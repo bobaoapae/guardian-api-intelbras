@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar Intelbras Guardian",
+        "description": "Insira suas credenciais da conta Intelbras e o endereco do middleware FastAPI.",
+        "data": {
+          "username": "Email",
+          "password": "Senha",
+          "fastapi_host": "Host do FastAPI",
+          "fastapi_port": "Porta do FastAPI"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Nao foi possivel conectar ao middleware FastAPI. Verifique o host e a porta.",
+      "invalid_auth": "Credenciais invalidas. Verifique seu email e senha.",
+      "unknown": "Ocorreu um erro inesperado."
+    },
+    "abort": {
+      "already_configured": "Esta conta ja esta configurada."
+    }
+  }
+}

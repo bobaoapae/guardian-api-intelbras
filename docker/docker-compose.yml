@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  fastapi:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: intelbras-guardian-api
+    ports:
+      - "8000:8000"
+    environment:
+      - INTELBRAS_API_URL=https://api-guardian.intelbras.com.br:8443
+      - INTELBRAS_OAUTH_URL=https://api.conta.intelbras.com/auth
+      - INTELBRAS_CLIENT_ID=xHCEFEMoQnBcIHcw8ACqbU9aZaYa
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DEBUG=false
+      - LOG_LEVEL=INFO
+      - HTTP_TIMEOUT=30
+      - TOKEN_REFRESH_BUFFER=300
+      - CORS_ORIGINS=*
+    volumes:
+      # Persist session data
+      - intelbras-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - intelbras-network
+
+networks:
+  intelbras-network:
+    driver: bridge
+
+volumes:
+  intelbras-data:

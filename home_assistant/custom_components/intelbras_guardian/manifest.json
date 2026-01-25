@@ -1,0 +1,12 @@
+{
+  "domain": "intelbras_guardian",
+  "name": "Intelbras Guardian",
+  "codeowners": ["@bobaoapae"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/bobaoapae/guardian-api-intelbras",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/bobaoapae/guardian-api-intelbras/issues",
+  "requirements": ["aiohttp>=3.9.0"],
+  "version": "1.0.0"
+}
