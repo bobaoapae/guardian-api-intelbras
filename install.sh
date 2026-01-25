@@ -347,10 +347,8 @@ detect_ha_container() {
     if echo "$HA_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
         print_success "IP detectado: $HA_IP"
     else
-        print_warning "Não foi possível detectar IP automaticamente"
-        # Usar localhost como fallback - CORS será configurado para aceitar qualquer origem local
+        # IP não é necessário para a integração (server-to-server)
         HA_IP="localhost"
-        print_info "Usando 'localhost' - CORS será configurado para rede local"
     fi
 
     # Confirmar ou pedir informações
