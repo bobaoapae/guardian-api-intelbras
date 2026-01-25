@@ -29,7 +29,7 @@ set -e
 # Variáveis Globais
 #-------------------------------------------------------------------------------
 
-VERSION="1.0.5"
+VERSION="1.0.6"
 GITHUB_REPO="https://github.com/bobaoapae/guardian-api-intelbras"
 GITHUB_ZIP="https://github.com/bobaoapae/guardian-api-intelbras/archive/refs/heads/main.zip"
 
@@ -384,17 +384,29 @@ detect_ha_container() {
 setup_directories() {
     print_step "3/11 - Configurando diretórios"
 
-    # Diretório de instalação
-    ask_input "Diretório de instalação da API" "$DEFAULT_INSTALL_DIR" INSTALL_DIR
+    # Calcular diretório padrão baseado no HA_CONFIG_DIR
+    # Se HA config está em /home/joao/docker-volumes/home-assistant/config
+    # Usar /home/joao/docker-volumes/intelbras-guardian
+    local default_dir="$DEFAULT_INSTALL_DIR"
+    if [ -n "$HA_CONFIG_DIR" ]; then
+        # Pegar o diretório pai do pai (ex: /home/joao/docker-volumes)
+        local parent_dir=$(dirname "$(dirname "$HA_CONFIG_DIR")")
+        if [ -d "$parent_dir" ] && [ -w "$parent_dir" ]; then
+            default_dir="${parent_dir}/intelbras-guardian"
+        fi
+    fi
 
-    # Diretório de dados
-    ask_input "Diretório para dados persistentes" "$DEFAULT_DATA_DIR" DATA_DIR
+    # Diretório de instalação (código + dados no mesmo lugar)
+    ask_input "Diretório da API" "$default_dir" INSTALL_DIR
+
+    # Dados ficam no mesmo diretório
+    DATA_DIR="${INSTALL_DIR}/data"
 
     # Porta da API
-    ask_input "Porta da API FastAPI" "$DEFAULT_API_PORT" API_PORT
+    ask_input "Porta da API" "$DEFAULT_API_PORT" API_PORT
 
     # Verificar se porta está em uso
-    if netstat -tuln 2>/dev/null | grep -q ":$API_PORT " || ss -tuln 2>/dev/null | grep -q ":$API_PORT "; then
+    if ss -tuln 2>/dev/null | grep -q ":$API_PORT " || netstat -tuln 2>/dev/null | grep -q ":$API_PORT "; then
         print_warning "Porta $API_PORT parece estar em uso!"
         if ! ask_yes_no "Deseja continuar mesmo assim?"; then
             ask_input "Digite uma porta alternativa" "8001" API_PORT
@@ -406,11 +418,9 @@ setup_directories() {
     print_info "Criando diretórios..."
 
     mkdir -p "$INSTALL_DIR"
-    print_success "Criado: $INSTALL_DIR"
-
     mkdir -p "$DATA_DIR"
     chmod 755 "$DATA_DIR"
-    print_success "Criado: $DATA_DIR"
+    print_success "Criado: $INSTALL_DIR"
 }
 
 #-------------------------------------------------------------------------------
