@@ -29,7 +29,7 @@ set -e
 # Variáveis Globais
 #-------------------------------------------------------------------------------
 
-VERSION="1.0.4"
+VERSION="1.0.5"
 GITHUB_REPO="https://github.com/bobaoapae/guardian-api-intelbras"
 GITHUB_ZIP="https://github.com/bobaoapae/guardian-api-intelbras/archive/refs/heads/main.zip"
 
@@ -227,7 +227,7 @@ check_root() {
 }
 
 check_prerequisites() {
-    print_step "1/12 - Verificando pré-requisitos"
+    print_step "1/11 - Verificando pré-requisitos"
 
     local missing=()
 
@@ -298,7 +298,7 @@ check_prerequisites() {
 #-------------------------------------------------------------------------------
 
 detect_ha_container() {
-    print_step "2/12 - Detectando Home Assistant"
+    print_step "2/11 - Detectando Home Assistant"
 
     # Tentar encontrar container do HA
     local containers=$(docker ps --format "{{.Names}}" 2>/dev/null)
@@ -384,7 +384,7 @@ detect_ha_container() {
 #-------------------------------------------------------------------------------
 
 setup_directories() {
-    print_step "3/12 - Configurando diretórios"
+    print_step "3/11 - Configurando diretórios"
 
     # Diretório de instalação
     ask_input "Diretório de instalação da API" "$DEFAULT_INSTALL_DIR" INSTALL_DIR
@@ -420,7 +420,7 @@ setup_directories() {
 #-------------------------------------------------------------------------------
 
 download_files() {
-    print_step "4/12 - Baixando arquivos"
+    print_step "4/11 - Baixando arquivos"
 
     cd "$INSTALL_DIR"
 
@@ -472,13 +472,9 @@ download_files() {
 #-------------------------------------------------------------------------------
 
 configure_cors() {
-    print_step "5/12 - Configurando CORS"
-
-    # Para uso em rede local, aceitar qualquer origem é seguro e evita problemas
+    # CORS não é necessário - HA backend se comunica diretamente com a API (server-to-server)
+    # Mantemos '*' apenas para a Web UI de testes
     CORS_ORIGINS="*"
-
-    print_success "CORS configurado para aceitar qualquer origem (rede local)"
-    print_info "Para produção, edite CORS_ORIGINS no docker-compose.override.yml"
 }
 
 #-------------------------------------------------------------------------------
@@ -486,7 +482,7 @@ configure_cors() {
 #-------------------------------------------------------------------------------
 
 choose_deploy_mode() {
-    print_step "6/12 - Escolha do modo de deploy"
+    print_step "5/11 - Escolha do modo de deploy"
 
     echo "Como deseja instalar a API?"
     echo ""
@@ -507,7 +503,7 @@ choose_deploy_mode() {
 #-------------------------------------------------------------------------------
 
 generate_docker_compose() {
-    print_step "7/12 - Gerando configuração Docker"
+    print_step "6/11 - Gerando configuração Docker"
 
     if [ "$DEPLOY_MODE" = "standalone" ]; then
         # Criar docker-compose.override.yml com configurações personalizadas
@@ -572,7 +568,7 @@ EOF
 #-------------------------------------------------------------------------------
 
 install_ha_integration() {
-    print_step "8/12 - Instalando integração do Home Assistant"
+    print_step "7/11 - Instalando integração do Home Assistant"
 
     local custom_components="$HA_CONFIG_DIR/custom_components"
     local integration_src="$INSTALL_DIR/home_assistant/custom_components/intelbras_guardian"
@@ -620,7 +616,7 @@ install_ha_integration() {
 #-------------------------------------------------------------------------------
 
 start_services() {
-    print_step "9/12 - Iniciando serviços"
+    print_step "8/11 - Iniciando serviços"
 
     cd "$INSTALL_DIR"
 
@@ -666,7 +662,7 @@ start_services() {
 #-------------------------------------------------------------------------------
 
 verify_installation() {
-    print_step "10/12 - Verificando instalação"
+    print_step "9/11 - Verificando instalação"
 
     local errors=0
 
@@ -713,7 +709,7 @@ verify_installation() {
 #-------------------------------------------------------------------------------
 
 setup_systemd() {
-    print_step "11/12 - Configuração de auto-início"
+    print_step "10/11 - Configuração de auto-início"
 
     if ! ask_yes_no "Deseja criar serviço systemd para iniciar automaticamente no boot?"; then
         print_info "Pulando configuração do systemd"
@@ -755,7 +751,7 @@ EOF
 #-------------------------------------------------------------------------------
 
 print_summary() {
-    print_step "12/12 - Instalação Concluída!"
+    print_step "11/11 - Instalação Concluída!"
 
     local host_ip=$(hostname -I | awk '{print $1}')
 
