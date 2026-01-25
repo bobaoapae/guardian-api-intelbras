@@ -926,9 +926,57 @@ update() {
     print_header
     print_step "Atualização"
 
-    ask_input "Diretório de instalação" "$DEFAULT_INSTALL_DIR" INSTALL_DIR
+    # Detectar comando docker compose
+    DOCKER_COMPOSE=$(get_docker_compose_cmd)
+    if [ -z "$DOCKER_COMPOSE" ]; then
+        print_error "Docker Compose não encontrado"
+        exit 1
+    fi
 
-    if [ ! -d "$INSTALL_DIR" ]; then
+    # Tentar detectar diretório de instalação automaticamente
+    local detected_dir=""
+
+    # 1. Verificar se estamos no diretório de instalação
+    if [ -f "./docker/Dockerfile" ] && [ -f "./docker/docker-compose.yml" ]; then
+        detected_dir="$(pwd)"
+    fi
+
+    # 2. Verificar diretório pai do script
+    if [ -z "$detected_dir" ]; then
+        local script_dir="$(cd "$(dirname "$0")" && pwd)"
+        if [ -f "$script_dir/docker/Dockerfile" ]; then
+            detected_dir="$script_dir"
+        fi
+    fi
+
+    # 3. Verificar locais comuns
+    if [ -z "$detected_dir" ]; then
+        for dir in "/opt/intelbras-guardian" "/home/*/docker-volumes/intelbras-guardian" "/var/lib/intelbras-guardian"; do
+            for d in $dir; do
+                if [ -f "$d/docker/Dockerfile" ]; then
+                    detected_dir="$d"
+                    break 2
+                fi
+            done
+        done
+    fi
+
+    # 4. Procurar container existente e inferir diretório
+    if [ -z "$detected_dir" ]; then
+        local container_dir=$(docker inspect intelbras-guardian-api --format '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' 2>/dev/null | sed 's|/data$||')
+        if [ -n "$container_dir" ] && [ -f "$container_dir/docker/Dockerfile" ]; then
+            detected_dir="$container_dir"
+        fi
+    fi
+
+    if [ -n "$detected_dir" ]; then
+        print_success "Instalação detectada em: $detected_dir"
+        INSTALL_DIR="$detected_dir"
+    else
+        ask_input "Diretório de instalação não detectado. Informe manualmente" "$DEFAULT_INSTALL_DIR" INSTALL_DIR
+    fi
+
+    if [ ! -d "$INSTALL_DIR" ] || [ ! -f "$INSTALL_DIR/docker/Dockerfile" ]; then
         print_error "Instalação não encontrada em $INSTALL_DIR"
         exit 1
     fi
@@ -963,16 +1011,67 @@ update() {
     $DOCKER_COMPOSE -f docker/docker-compose.yml -f docker-compose.override.yml up -d
     print_success "Container atualizado"
 
-    # Atualizar integração HA
-    ask_input "Diretório config do HA" "/home/$USER/homeassistant" HA_CONFIG_DIR
+    # Atualizar integração HA - tentar detectar automaticamente
+    local ha_config_detected=""
+
+    # 1. Procurar integração existente em locais comuns
+    for dir in "/home/*/docker-volumes/home-assistant/config" "/home/*/docker-volumes/homeassistant" "/home/*/homeassistant" "/config" "/var/lib/homeassistant"; do
+        for d in $dir; do
+            if [ -d "$d/custom_components/intelbras_guardian" ]; then
+                ha_config_detected="$d"
+                break 2
+            fi
+        done
+    done
+
+    # 2. Tentar via container do HA
+    if [ -z "$ha_config_detected" ]; then
+        for container in homeassistant home-assistant hass; do
+            local ha_mount=$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' 2>/dev/null)
+            if [ -n "$ha_mount" ] && [ -d "$ha_mount" ]; then
+                ha_config_detected="$ha_mount"
+                break
+            fi
+        done
+    fi
+
+    if [ -n "$ha_config_detected" ]; then
+        print_success "Config do HA detectado em: $ha_config_detected"
+        HA_CONFIG_DIR="$ha_config_detected"
+    else
+        ask_input "Diretório config do HA não detectado. Informe manualmente" "/home/$USER/homeassistant" HA_CONFIG_DIR
+    fi
+
     local integration_dst="$HA_CONFIG_DIR/custom_components/intelbras_guardian"
 
-    if [ -d "$integration_dst" ]; then
+    if [ -d "$HA_CONFIG_DIR" ]; then
+        mkdir -p "$HA_CONFIG_DIR/custom_components"
         print_info "Atualizando integração do Home Assistant..."
         rm -rf "$integration_dst"
         cp -r "$INSTALL_DIR/home_assistant/custom_components/intelbras_guardian" "$integration_dst"
         print_success "Integração atualizada"
-        print_warning "Reinicie o Home Assistant para aplicar: docker restart homeassistant"
+
+        # Tentar reiniciar HA automaticamente
+        local ha_container=""
+        for container in homeassistant home-assistant hass; do
+            if docker ps --format "{{.Names}}" | grep -q "^${container}$"; then
+                ha_container="$container"
+                break
+            fi
+        done
+
+        if [ -n "$ha_container" ]; then
+            if ask_yes_no "Reiniciar Home Assistant agora?"; then
+                docker restart "$ha_container"
+                print_success "Home Assistant reiniciado"
+            else
+                print_warning "Reinicie o Home Assistant manualmente: docker restart $ha_container"
+            fi
+        else
+            print_warning "Reinicie o Home Assistant para aplicar as alterações"
+        fi
+    else
+        print_warning "Diretório do HA não encontrado. Atualize a integração manualmente."
     fi
 
     echo ""
