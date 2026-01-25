@@ -151,17 +151,43 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 ### Passo 1: Copiar Arquivos da Integração
 
-```bash
-# Se o Home Assistant está na mesma máquina
-cp -r home_assistant/custom_components/intelbras_guardian \
-      /config/custom_components/
+**Para Home Assistant em Docker (Container):**
 
-# Ou via SSH/SCP
+```bash
+# Descobrir o caminho do volume de configuração do HA
+docker inspect homeassistant --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}'
+# Exemplo de saída: /home/usuario/homeassistant
+
+# Criar diretório custom_components se não existir
+mkdir -p /home/usuario/homeassistant/custom_components
+
+# Copiar integração
+cp -r home_assistant/custom_components/intelbras_guardian \
+      /home/usuario/homeassistant/custom_components/
+
+# Reiniciar Home Assistant
+docker restart homeassistant
+```
+
+**Para Home Assistant OS/Supervised:**
+
+Use o Add-on (veja Opção 1) - não precisa copiar arquivos manualmente.
+
+**Via SSH/SCP (qualquer instalação):**
+
+```bash
 scp -r home_assistant/custom_components/intelbras_guardian \
-      usuario@homeassistant:/config/custom_components/
+      usuario@ip-do-ha:/caminho/config/custom_components/
 ```
 
 ### Passo 2: Reiniciar Home Assistant
+
+**Docker:**
+```bash
+docker restart homeassistant
+```
+
+**Home Assistant OS/Supervised:**
 
 Vá em **Configurações** → **Sistema** → **Reiniciar**
 

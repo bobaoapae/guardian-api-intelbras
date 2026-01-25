@@ -212,13 +212,26 @@ Abra http://localhost:8000 no navegador para:
 
 ### 3. Instalar Integração do Home Assistant
 
+**Para Home Assistant em Docker:**
+
 ```bash
-# Copiar integração para o Home Assistant
+# Descobrir o caminho do volume de configuração do HA
+docker inspect homeassistant --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}'
+# Exemplo de saída: /home/usuario/homeassistant
+
+# Copiar integração para o diretório de configuração do HA
+# Substitua /home/usuario/homeassistant pelo caminho do seu HA
+mkdir -p /home/usuario/homeassistant/custom_components
 cp -r home_assistant/custom_components/intelbras_guardian \
-      /config/custom_components/
+      /home/usuario/homeassistant/custom_components/
 
 # Reiniciar Home Assistant
+docker restart homeassistant
 ```
+
+**Para Home Assistant OS/Supervised:**
+
+Use o Add-on (Opção 1) que já inclui a API integrada.
 
 ### 4. Configurar Integração
 
