@@ -2,23 +2,30 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configurar Intelbras Guardian",
-        "description": "Insira suas credenciais da conta Intelbras e o endereco do middleware FastAPI.",
+        "title": "Intelbras Guardian - Conexao API",
+        "description": "Informe o endereco do middleware FastAPI para conectar.",
         "data": {
-          "username": "Email",
-          "password": "Senha",
-          "fastapi_host": "Host do FastAPI",
+          "fastapi_host": "Host do FastAPI (IP ou hostname)",
           "fastapi_port": "Porta do FastAPI"
+        }
+      },
+      "oauth": {
+        "title": "Intelbras Guardian - Login",
+        "description": "Para completar a autenticacao:\n\n1. Abra o link abaixo no seu navegador:\n\n**{auth_url}**\n\n2. Faca login com sua conta Intelbras\n\n3. Apos o login, voce sera redirecionado para uma pagina com uma URL contendo `code=` e `state=`\n\n4. Copie a **URL completa** da barra de endereco do navegador e cole abaixo\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "URL de Callback (cole a URL completa apos o login)"
         }
       }
     },
     "error": {
       "cannot_connect": "Nao foi possivel conectar ao middleware FastAPI. Verifique o host e a porta.",
-      "invalid_auth": "Credenciais invalidas. Verifique seu email e senha.",
+      "oauth_start_failed": "Falha ao iniciar fluxo OAuth. Verifique os logs do FastAPI.",
+      "oauth_callback_failed": "Autenticacao falhou. Certifique-se de copiar a URL completa de callback.",
+      "callback_url_required": "Por favor, cole a URL de callback.",
       "unknown": "Ocorreu um erro inesperado."
     },
     "abort": {
-      "already_configured": "Esta conta ja esta configurada."
+      "already_configured": "Esta instancia da API ja esta configurada."
     }
   },
   "options": {
@@ -28,7 +35,15 @@
         "description": "Selecione uma opcao para configurar.",
         "menu_options": {
           "configure_device_password": "Configurar Senha do Dispositivo",
-          "manage_zones": "Gerenciar Nomes das Zonas"
+          "manage_zones": "Gerenciar Nomes das Zonas",
+          "reauth": "Re-autenticar (se a sessao expirou)"
+        }
+      },
+      "reauth": {
+        "title": "Intelbras Guardian - Re-autenticar",
+        "description": "Sua sessao pode ter expirado. Para re-autenticar:\n\n1. Abra o link abaixo no seu navegador:\n\n**{auth_url}**\n\n2. Faca login com sua conta Intelbras\n\n3. Apos o login, copie a **URL completa** da barra de endereco do navegador e cole abaixo\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "URL de Callback (cole a URL completa apos o login)"
         }
       },
       "configure_device_password": {
@@ -54,7 +69,9 @@
     "error": {
       "save_failed": "Falha ao salvar senha. Verifique os logs do FastAPI.",
       "delete_failed": "Falha ao remover senha.",
-      "password_required": "A senha e obrigatoria."
+      "password_required": "A senha e obrigatoria.",
+      "oauth_callback_failed": "Autenticacao falhou. Certifique-se de copiar a URL completa de callback.",
+      "callback_url_required": "Por favor, cole a URL de callback."
     },
     "abort": {
       "not_loaded": "Integracao nao carregada. Tente novamente.",

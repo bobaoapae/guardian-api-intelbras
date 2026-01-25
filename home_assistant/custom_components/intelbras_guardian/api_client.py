@@ -30,8 +30,81 @@ class GuardianApiClient:
         """Get current session ID."""
         return self._session_id
 
+    @property
+    def base_url(self) -> str:
+        """Get base URL."""
+        return self._base_url
+
+    async def start_oauth(self) -> Optional[Dict[str, Any]]:
+        """Start OAuth flow and get authorization URL.
+
+        Returns dict with:
+        - auth_url: URL to open in browser
+        - state: State parameter for callback
+        - redirect_uri: Redirect URI used
+        - instructions: Instructions for user
+        """
+        try:
+            async with async_timeout.timeout(self._timeout):
+                response = await self._session.post(
+                    f"{self._base_url}/api/v1/auth/start"
+                )
+
+                if response.status == 200:
+                    data = await response.json()
+                    _LOGGER.info("OAuth flow started successfully")
+                    return data
+                else:
+                    error = await response.text()
+                    _LOGGER.error(f"Failed to start OAuth: {error}")
+                    return None
+
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Connection error starting OAuth: {e}")
+            return None
+        except Exception as e:
+            _LOGGER.error(f"Unexpected error starting OAuth: {e}")
+            return None
+
+    async def complete_oauth(self, callback_url: str) -> bool:
+        """Complete OAuth flow with callback URL.
+
+        Args:
+            callback_url: The full callback URL with code and state parameters
+
+        Returns:
+            True if authentication successful
+        """
+        try:
+            async with async_timeout.timeout(self._timeout):
+                response = await self._session.post(
+                    f"{self._base_url}/api/v1/auth/callback-url",
+                    json={"callback_url": callback_url}
+                )
+
+                if response.status == 200:
+                    data = await response.json()
+                    self._session_id = data.get("session_id")
+                    _LOGGER.info("OAuth authentication successful")
+                    return True
+                else:
+                    error = await response.text()
+                    _LOGGER.error(f"OAuth callback failed: {error}")
+                    return False
+
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Connection error during OAuth callback: {e}")
+            return False
+        except Exception as e:
+            _LOGGER.error(f"Unexpected error during OAuth callback: {e}")
+            return False
+
     async def authenticate(self, username: str, password: str) -> bool:
-        """Authenticate with the API."""
+        """Authenticate with the API (legacy - password grant).
+
+        Note: This method may not work if the API only supports OAuth.
+        Use start_oauth() and complete_oauth() instead.
+        """
         try:
             async with async_timeout.timeout(self._timeout):
                 response = await self._session.post(

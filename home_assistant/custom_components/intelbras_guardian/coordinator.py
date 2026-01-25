@@ -39,10 +39,34 @@ class GuardianCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from API."""
         try:
+            # Check if we have a valid session
+            if not self.client.session_id:
+                _LOGGER.warning(
+                    "No active session. Please re-authenticate via integration options."
+                )
+                return {
+                    "devices": {},
+                    "partitions": [],
+                    "zones": [],
+                    "events": [],
+                    "new_events": [],
+                    "last_event": None,
+                    "needs_reauth": True,
+                }
+
             # Get devices
             devices = await self.client.get_devices()
             if not devices:
-                raise UpdateFailed("Failed to fetch devices")
+                _LOGGER.warning("No devices found or session may be invalid")
+                return {
+                    "devices": {},
+                    "partitions": [],
+                    "zones": [],
+                    "events": [],
+                    "new_events": [],
+                    "last_event": None,
+                    "needs_reauth": True,
+                }
 
             # Get events
             events = await self.client.get_events(limit=20)

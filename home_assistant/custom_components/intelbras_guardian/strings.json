@@ -2,23 +2,30 @@
   "config": {
     "step": {
       "user": {
-        "title": "Intelbras Guardian Setup",
-        "description": "Enter your Intelbras account credentials and FastAPI middleware address.",
+        "title": "Intelbras Guardian - API Connection",
+        "description": "Enter the FastAPI middleware address to connect.",
         "data": {
-          "username": "Email",
-          "password": "Password",
-          "fastapi_host": "FastAPI Host",
+          "fastapi_host": "FastAPI Host (IP or hostname)",
           "fastapi_port": "FastAPI Port"
+        }
+      },
+      "oauth": {
+        "title": "Intelbras Guardian - Login",
+        "description": "To complete authentication:\n\n1. Open the link below in your browser:\n\n**{auth_url}**\n\n2. Login with your Intelbras account\n\n3. After login, you will be redirected to a page with a URL containing `code=` and `state=`\n\n4. Copy the **complete URL** from the browser address bar and paste below\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "Callback URL (paste the complete URL after login)"
         }
       }
     },
     "error": {
       "cannot_connect": "Cannot connect to FastAPI middleware. Check the host and port.",
-      "invalid_auth": "Invalid credentials. Check your email and password.",
+      "oauth_start_failed": "Failed to start OAuth flow. Check the FastAPI logs.",
+      "oauth_callback_failed": "Authentication failed. Make sure you copied the complete callback URL.",
+      "callback_url_required": "Please paste the callback URL.",
       "unknown": "Unexpected error occurred."
     },
     "abort": {
-      "already_configured": "This account is already configured."
+      "already_configured": "This API instance is already configured."
     }
   },
   "options": {
@@ -28,7 +35,15 @@
         "description": "Select an option to configure.",
         "menu_options": {
           "configure_device_password": "Configure Device Password",
-          "manage_zones": "Manage Zone Names"
+          "manage_zones": "Manage Zone Names",
+          "reauth": "Re-authenticate (if session expired)"
+        }
+      },
+      "reauth": {
+        "title": "Intelbras Guardian - Re-authenticate",
+        "description": "Your session may have expired. To re-authenticate:\n\n1. Open the link below in your browser:\n\n**{auth_url}**\n\n2. Login with your Intelbras account\n\n3. After login, copy the **complete URL** from the browser address bar and paste below\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "Callback URL (paste the complete URL after login)"
         }
       },
       "configure_device_password": {
@@ -54,7 +69,9 @@
     "error": {
       "save_failed": "Failed to save password. Check the FastAPI logs.",
       "delete_failed": "Failed to delete password.",
-      "password_required": "Password is required."
+      "password_required": "Password is required.",
+      "oauth_callback_failed": "Authentication failed. Make sure you copied the complete callback URL.",
+      "callback_url_required": "Please paste the callback URL."
     },
     "abort": {
       "not_loaded": "Integration not loaded. Please try again.",

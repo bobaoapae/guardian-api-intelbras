@@ -2,7 +2,6 @@
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -26,37 +25,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session=session,
     )
 
-    # Try to restore session first
+    # Try to restore session
     stored_session_id = entry.data.get(CONF_SESSION_ID)
     if stored_session_id:
         client.set_session_id(stored_session_id)
         if await client.check_session():
             _LOGGER.info("Restored existing session")
         else:
-            _LOGGER.info("Stored session expired, re-authenticating")
-            stored_session_id = None
+            _LOGGER.warning("Stored session expired or invalid")
+            # Session is invalid - user needs to re-authenticate via OAuth
+            # The integration will still load but with limited functionality
+            # User can re-authenticate via Options -> Re-authenticate
+            client.set_session_id(None)
 
-    # Authenticate if no valid session
-    if not stored_session_id:
-        if not await client.authenticate(
-            entry.data[CONF_USERNAME],
-            entry.data[CONF_PASSWORD]
-        ):
-            _LOGGER.error("Failed to authenticate with Intelbras Guardian API")
-            raise ConfigEntryAuthFailed("Authentication failed")
-
-        # Store the new session ID
-        new_data = {**entry.data, CONF_SESSION_ID: client.session_id}
-        hass.config_entries.async_update_entry(entry, data=new_data)
+    if not client.session_id:
+        _LOGGER.warning(
+            "No valid session. Please re-authenticate via integration options "
+            "(Settings -> Devices & Services -> Intelbras Guardian -> Configure -> Re-authenticate)"
+        )
+        # We still set up the integration so user can re-authenticate
+        # The coordinator will handle the missing session gracefully
 
     # Create coordinator
     coordinator = GuardianCoordinator(hass, client, entry)
 
-    # Fetch initial data
-    await coordinator.async_config_entry_first_refresh()
-
-    # Store coordinator
+    # Store coordinator first so options flow can access it
     hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    # Fetch initial data (will fail gracefully if not authenticated)
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryAuthFailed:
+        _LOGGER.warning(
+            "Authentication required. Please use Options -> Re-authenticate"
+        )
+        # Don't raise - let the integration load so user can re-auth
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

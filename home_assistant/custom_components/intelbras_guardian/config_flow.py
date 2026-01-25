@@ -6,7 +6,6 @@ import aiohttp
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -15,60 +14,40 @@ from .api_client import GuardianApiClient
 from .const import (
     CONF_FASTAPI_HOST,
     CONF_FASTAPI_PORT,
+    CONF_SESSION_ID,
     DEFAULT_FASTAPI_PORT,
     DOMAIN,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
+# Step 1: API connection
+STEP_API_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_USERNAME): str,
-        vol.Required(CONF_PASSWORD): str,
         vol.Required(CONF_FASTAPI_HOST): str,
         vol.Required(CONF_FASTAPI_PORT, default=DEFAULT_FASTAPI_PORT): int,
     }
 )
 
-
-async def validate_input(
-    hass: HomeAssistant,
-    data: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Validate the user input allows us to connect."""
-    session = async_get_clientsession(hass)
-
-    client = GuardianApiClient(
-        host=data[CONF_FASTAPI_HOST],
-        port=data[CONF_FASTAPI_PORT],
-        session=session,
-    )
-
-    # First check if API is reachable
-    if not await client.check_connection():
-        raise CannotConnect("Cannot connect to FastAPI middleware")
-
-    # Then try to authenticate
-    if not await client.authenticate(data[CONF_USERNAME], data[CONF_PASSWORD]):
-        raise InvalidAuth("Invalid credentials")
-
-    # Get devices to verify everything works
-    devices = await client.get_devices()
-    if not devices:
-        _LOGGER.warning("No devices found, but authentication succeeded")
-
-    # Return info to be stored in the config entry
-    return {
-        "title": f"Intelbras Guardian ({data[CONF_USERNAME]})",
-        "session_id": client.session_id,
-        "device_count": len(devices),
+# Step 2: OAuth callback URL
+STEP_OAUTH_SCHEMA = vol.Schema(
+    {
+        vol.Required("callback_url"): str,
     }
+)
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Intelbras Guardian."""
 
     VERSION = 1
+
+    def __init__(self):
+        """Initialize the config flow."""
+        self._host: Optional[str] = None
+        self._port: Optional[int] = None
+        self._auth_url: Optional[str] = None
+        self._client: Optional[GuardianApiClient] = None
 
     @staticmethod
     @callback
@@ -82,33 +61,83 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self,
         user_input: Optional[Dict[str, Any]] = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial step - API connection."""
         errors: Dict[str, str] = {}
 
         if user_input is not None:
-            try:
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                # Check if already configured
-                await self.async_set_unique_id(user_input[CONF_USERNAME])
-                self._abort_if_unique_id_configured()
+            self._host = user_input[CONF_FASTAPI_HOST]
+            self._port = user_input[CONF_FASTAPI_PORT]
 
-                return self.async_create_entry(
-                    title=info["title"],
-                    data=user_input,
-                )
+            session = async_get_clientsession(self.hass)
+            self._client = GuardianApiClient(
+                host=self._host,
+                port=self._port,
+                session=session,
+            )
+
+            # Check if API is reachable
+            if not await self._client.check_connection():
+                errors["base"] = "cannot_connect"
+            else:
+                # Start OAuth flow
+                oauth_data = await self._client.start_oauth()
+                if oauth_data:
+                    self._auth_url = oauth_data.get("auth_url")
+                    return await self.async_step_oauth()
+                else:
+                    errors["base"] = "oauth_start_failed"
 
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            data_schema=STEP_API_SCHEMA,
             errors=errors,
+        )
+
+    async def async_step_oauth(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Handle OAuth step - show URL and receive callback."""
+        errors: Dict[str, str] = {}
+
+        if user_input is not None:
+            callback_url = user_input.get("callback_url", "").strip()
+
+            if callback_url:
+                # Complete OAuth flow
+                if await self._client.complete_oauth(callback_url):
+                    # Get devices to verify everything works
+                    devices = await self._client.get_devices()
+                    device_count = len(devices)
+
+                    if device_count == 0:
+                        _LOGGER.warning("No devices found, but authentication succeeded")
+
+                    # Create unique ID from session
+                    await self.async_set_unique_id(f"guardian_{self._host}_{self._port}")
+                    self._abort_if_unique_id_configured()
+
+                    return self.async_create_entry(
+                        title=f"Intelbras Guardian ({self._host})",
+                        data={
+                            CONF_FASTAPI_HOST: self._host,
+                            CONF_FASTAPI_PORT: self._port,
+                            CONF_SESSION_ID: self._client.session_id,
+                        },
+                    )
+                else:
+                    errors["base"] = "oauth_callback_failed"
+            else:
+                errors["base"] = "callback_url_required"
+
+        return self.async_show_form(
+            step_id="oauth",
+            data_schema=STEP_OAUTH_SCHEMA,
+            errors=errors,
+            description_placeholders={
+                "auth_url": self._auth_url or "",
+                "api_url": f"http://{self._host}:{self._port}",
+            },
         )
 
 
@@ -128,7 +157,58 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Manage the options - show menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["configure_device_password", "manage_zones"],
+            menu_options=["configure_device_password", "manage_zones", "reauth"],
+        )
+
+    async def async_step_reauth(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Handle re-authentication via OAuth."""
+        errors: Dict[str, str] = {}
+
+        # Get coordinator from hass.data
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+
+        if user_input is not None:
+            callback_url = user_input.get("callback_url", "").strip()
+
+            if callback_url and coordinator:
+                # Complete OAuth flow
+                if await coordinator.client.complete_oauth(callback_url):
+                    # Update config entry with new session_id
+                    self.hass.config_entries.async_update_entry(
+                        self.config_entry,
+                        data={
+                            **self.config_entry.data,
+                            CONF_SESSION_ID: coordinator.client.session_id,
+                        },
+                    )
+                    await coordinator.async_request_refresh()
+                    return self.async_create_entry(title="", data={})
+                else:
+                    errors["base"] = "oauth_callback_failed"
+            else:
+                errors["base"] = "callback_url_required"
+
+        # Start OAuth flow
+        auth_url = ""
+        if coordinator:
+            oauth_data = await coordinator.client.start_oauth()
+            if oauth_data:
+                auth_url = oauth_data.get("auth_url", "")
+
+        host = self.config_entry.data.get(CONF_FASTAPI_HOST, "")
+        port = self.config_entry.data.get(CONF_FASTAPI_PORT, DEFAULT_FASTAPI_PORT)
+
+        return self.async_show_form(
+            step_id="reauth",
+            data_schema=STEP_OAUTH_SCHEMA,
+            errors=errors,
+            description_placeholders={
+                "auth_url": auth_url,
+                "api_url": f"http://{host}:{port}",
+            },
         )
 
     async def async_step_configure_device_password(
