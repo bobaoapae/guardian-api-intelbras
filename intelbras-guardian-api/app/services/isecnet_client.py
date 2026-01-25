@@ -51,8 +51,15 @@ class ISECNetClient:
         """Initialize the ISECNet client."""
         self._connections: Dict[int, DeviceConnection] = {}
         self._lock = asyncio.Lock()
+        self._device_locks: Dict[int, asyncio.Lock] = {}  # Per-device operation locks
         self._keep_alive_task: Optional[asyncio.Task] = None
         self._running = False
+
+    def _get_device_lock(self, device_id: int) -> asyncio.Lock:
+        """Get or create a lock for a specific device."""
+        if device_id not in self._device_locks:
+            self._device_locks[device_id] = asyncio.Lock()
+        return self._device_locks[device_id]
 
     async def start(self):
         """Start the client service (including keep-alive loop)."""
@@ -272,25 +279,28 @@ class ISECNetClient:
         Returns:
             Tuple of (success, AlarmStatus, message)
         """
-        success, conn = await self._ensure_connected(
-            device_id, mac, password,
-            use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
-        )
-        if not success or not conn:
-            return False, AlarmStatus(), "Not connected"
+        # Use per-device lock to prevent concurrent operations
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, AlarmStatus(), "Not connected"
 
-        try:
-            success, status = await conn.protocol.get_status()
-            if success:
-                return True, status, "OK"
-            else:
-                return False, AlarmStatus(), "Failed to get status"
-        except Exception as e:
-            logger.error(f"Error getting status for device {device_id}: {e}")
-            # Try reconnecting on error
-            async with self._lock:
-                await self._disconnect_device(device_id)
-            return False, AlarmStatus(), str(e)
+            try:
+                success, status = await conn.protocol.get_status()
+                if success:
+                    return True, status, "OK"
+                else:
+                    return False, AlarmStatus(), "Failed to get status"
+            except Exception as e:
+                logger.error(f"Error getting status for device {device_id}: {e}")
+                # Try reconnecting on error
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, AlarmStatus(), str(e)
 
     async def arm(
         self,
@@ -324,21 +334,24 @@ class ISECNetClient:
         Returns:
             Tuple of (success, message)
         """
-        success, conn = await self._ensure_connected(
-            device_id, mac, password,
-            use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
-        )
-        if not success or not conn:
-            return False, "Not connected"
+        # Use per-device lock to prevent concurrent operations
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
 
-        try:
-            success, message = await conn.protocol.arm(mode, partition_index, partitions_enabled)
-            return success, message
-        except Exception as e:
-            logger.error(f"Error arming device {device_id}: {e}")
-            async with self._lock:
-                await self._disconnect_device(device_id)
-            return False, str(e)
+            try:
+                success, message = await conn.protocol.arm(mode, partition_index, partitions_enabled)
+                return success, message
+            except Exception as e:
+                logger.error(f"Error arming device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
 
     async def disarm(
         self,
@@ -370,21 +383,24 @@ class ISECNetClient:
         Returns:
             Tuple of (success, message)
         """
-        success, conn = await self._ensure_connected(
-            device_id, mac, password,
-            use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
-        )
-        if not success or not conn:
-            return False, "Not connected"
+        # Use per-device lock to prevent concurrent operations
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
 
-        try:
-            success, message = await conn.protocol.disarm(partition_index, partitions_enabled)
-            return success, message
-        except Exception as e:
-            logger.error(f"Error disarming device {device_id}: {e}")
-            async with self._lock:
-                await self._disconnect_device(device_id)
-            return False, str(e)
+            try:
+                success, message = await conn.protocol.disarm(partition_index, partitions_enabled)
+                return success, message
+            except Exception as e:
+                logger.error(f"Error disarming device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
 
     async def shock_on(
         self,
