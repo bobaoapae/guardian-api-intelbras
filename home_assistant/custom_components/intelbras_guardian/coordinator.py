@@ -85,6 +85,8 @@ class GuardianCoordinator(DataUpdateCoordinator):
                 is_eletrificador = "ELC" in model or "ELETRIFICADOR" in model
 
                 # Try to get real-time status using auto-sync (uses saved password)
+                # This now also returns zones, eliminating need for separate /zones call
+                status_zones = []
                 if device.get("has_saved_password"):
                     try:
                         status = await self.client.get_alarm_status_auto(device_id)
@@ -112,17 +114,31 @@ class GuardianCoordinator(DataUpdateCoordinator):
                                     for partition in device.get("partitions", []):
                                         if partition.get("id") == rt_partition.get("index"):
                                             partition["status"] = rt_partition.get("state")
+
+                            # Get zones from status (avoids separate ISECNet call)
+                            if status.get("zones"):
+                                status_zones = status.get("zones", [])
                     except Exception as e:
                         _LOGGER.debug(f"Could not get real-time status for device {device_id}: {e}")
 
                 # Extract partitions (only for non-eletrificadores)
-                # If partitions_enabled is False, only add partition 0 (the main/only partition)
+                # Only add multiple partitions if partitions_enabled is explicitly True
+                # This avoids creating "ghost" entities that become unavailable later
                 if not is_eletrificador:
                     partitions_enabled = processed_devices[device_id].get("partitions_enabled")
                     device_partitions = device.get("partitions", [])
 
-                    if partitions_enabled is False:
-                        # Partitions disabled - only use first partition or create a virtual one
+                    if partitions_enabled is True and len(device_partitions) > 1:
+                        # Partitions explicitly enabled - add all partitions
+                        for partition in device_partitions:
+                            partition_copy = partition.copy()
+                            partition_copy["device_id"] = device_id
+                            partition_copy["device_mac"] = device.get("mac", "")
+                            partition_copy["device_model"] = device.get("model", "")
+                            all_partitions.append(partition_copy)
+                    else:
+                        # Partitions disabled or unknown - only use first partition
+                        # This is the safest default to avoid orphan entities
                         if device_partitions:
                             partition = device_partitions[0].copy()
                             partition["device_id"] = device_id
@@ -142,44 +158,37 @@ class GuardianCoordinator(DataUpdateCoordinator):
                                 "name": device.get("description", "Alarme"),
                                 "status": processed_devices[device_id].get("arm_mode"),
                             })
-                    else:
-                        # Partitions enabled or unknown - add all partitions
-                        for partition in device_partitions:
-                            partition["device_id"] = device_id
-                            partition["device_mac"] = device.get("mac", "")
-                            partition["device_model"] = device.get("model", "")
-                            all_partitions.append(partition)
 
-                # Get zones with friendly names from zones API
-                try:
-                    if device.get("has_saved_password"):
-                        zones_data = await self.client.get_zones(device_id)
-                        if zones_data and zones_data.get("zones"):
-                            for zone in zones_data.get("zones", []):
-                                zone["device_id"] = device_id
-                                zone["device_mac"] = device.get("mac", "")
-                                all_zones.append(zone)
-                        continue
-                except Exception as e:
-                    _LOGGER.debug(f"Could not get zones for device {device_id}: {e}")
+                # Get zones - prefer from status (already fetched), avoids extra ISECNet call
+                if status_zones:
+                    # Use zones from real-time status
+                    for zone in status_zones:
+                        all_zones.append({
+                            "device_id": device_id,
+                            "device_mac": device.get("mac", ""),
+                            "index": zone.get("index", 0),
+                            "name": zone.get("name", f"Zona {zone.get('index', 0) + 1:02d}"),
+                            "is_open": zone.get("is_open", False),
+                            "is_bypassed": zone.get("is_bypassed", False),
+                        })
+                else:
+                    # Fallback: use zones from device data (cloud API)
+                    device_zones = device.get("zones", [])
+                    if device_zones:
+                        # Try to calculate index from zone IDs (they are usually sequential)
+                        # e.g., IDs 21135370, 21135371, ... correspond to indices 0, 1, ...
+                        zone_ids = [z.get("id", 0) for z in device_zones if z.get("id")]
+                        min_zone_id = min(zone_ids) if zone_ids else 0
 
-                # Fallback: use zones from device data
-                device_zones = device.get("zones", [])
-                if device_zones:
-                    # Try to calculate index from zone IDs (they are usually sequential)
-                    # e.g., IDs 21135370, 21135371, ... correspond to indices 0, 1, ...
-                    zone_ids = [z.get("id", 0) for z in device_zones if z.get("id")]
-                    min_zone_id = min(zone_ids) if zone_ids else 0
-
-                    for zone in device_zones:
-                        zone["device_id"] = device_id
-                        zone["device_mac"] = device.get("mac", "")
-                        # Calculate index from ID (ID - min_ID = index)
-                        if "index" not in zone and zone.get("id"):
-                            zone["index"] = zone.get("id") - min_zone_id
-                        elif "index" not in zone:
-                            zone["index"] = 0
-                        all_zones.append(zone)
+                        for zone in device_zones:
+                            zone["device_id"] = device_id
+                            zone["device_mac"] = device.get("mac", "")
+                            # Calculate index from ID (ID - min_ID = index)
+                            if "index" not in zone and zone.get("id"):
+                                zone["index"] = zone.get("id") - min_zone_id
+                            elif "index" not in zone:
+                                zone["index"] = 0
+                            all_zones.append(zone)
 
             # Check for new events
             new_events = []
