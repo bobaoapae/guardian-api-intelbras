@@ -102,6 +102,10 @@ class GuardianCoordinator(DataUpdateCoordinator):
                                 processed_devices[device_id]["shock_triggered"] = status.get("shock_triggered")
                                 processed_devices[device_id]["alarm_triggered"] = status.get("alarm_triggered")
 
+                            # Update partitions_enabled from real-time status
+                            if "partitions_enabled" in status:
+                                processed_devices[device_id]["partitions_enabled"] = status.get("partitions_enabled")
+
                             # Update partition statuses from real-time data
                             if status.get("partitions"):
                                 for rt_partition in status.get("partitions", []):
@@ -112,12 +116,39 @@ class GuardianCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug(f"Could not get real-time status for device {device_id}: {e}")
 
                 # Extract partitions (only for non-eletrificadores)
+                # If partitions_enabled is False, only add partition 0 (the main/only partition)
                 if not is_eletrificador:
-                    for partition in device.get("partitions", []):
-                        partition["device_id"] = device_id
-                        partition["device_mac"] = device.get("mac", "")
-                        partition["device_model"] = device.get("model", "")
-                        all_partitions.append(partition)
+                    partitions_enabled = processed_devices[device_id].get("partitions_enabled")
+                    device_partitions = device.get("partitions", [])
+
+                    if partitions_enabled is False:
+                        # Partitions disabled - only use first partition or create a virtual one
+                        if device_partitions:
+                            partition = device_partitions[0].copy()
+                            partition["device_id"] = device_id
+                            partition["device_mac"] = device.get("mac", "")
+                            partition["device_model"] = device.get("model", "")
+                            partition["name"] = device.get("description", "Alarme")
+                            # Use device-level arm_mode
+                            partition["status"] = processed_devices[device_id].get("arm_mode")
+                            all_partitions.append(partition)
+                        else:
+                            # Create a virtual partition
+                            all_partitions.append({
+                                "id": 0,
+                                "device_id": device_id,
+                                "device_mac": device.get("mac", ""),
+                                "device_model": device.get("model", ""),
+                                "name": device.get("description", "Alarme"),
+                                "status": processed_devices[device_id].get("arm_mode"),
+                            })
+                    else:
+                        # Partitions enabled or unknown - add all partitions
+                        for partition in device_partitions:
+                            partition["device_id"] = device_id
+                            partition["device_mac"] = device.get("mac", "")
+                            partition["device_model"] = device.get("model", "")
+                            all_partitions.append(partition)
 
                 # Get zones with friendly names from zones API
                 try:
