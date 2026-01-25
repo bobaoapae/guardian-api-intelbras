@@ -114,7 +114,7 @@ get_host_ip() {
 
     # Método 1: ip route (mais confiável no Linux)
     if command -v ip &> /dev/null; then
-        ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1)
+        ip=$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}' | head -1)
     fi
 
     # Método 2: hostname -I
@@ -124,7 +124,7 @@ get_host_ip() {
 
     # Método 3: ifconfig
     if [ -z "$ip" ] && command -v ifconfig &> /dev/null; then
-        ip=$(ifconfig 2>/dev/null | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | awk '{print $2}' | head -1)
+        ip=$(ifconfig 2>/dev/null | awk '/inet / && !/127.0.0.1/ {gsub(/addr:/, "", $2); print $2; exit}')
     fi
 
     # Fallback
@@ -233,7 +233,7 @@ check_prerequisites() {
 
     # Docker
     if command -v docker &> /dev/null; then
-        local docker_version=$(docker --version | grep -oP '\d+\.\d+\.\d+' | head -1)
+        local docker_version=$(docker --version | sed 's/[^0-9.]*\([0-9.]*\).*/\1/' | head -1)
         print_success "Docker instalado (v$docker_version)"
     else
         missing+=("docker")
@@ -242,7 +242,7 @@ check_prerequisites() {
 
     # Docker Compose
     if command -v docker-compose &> /dev/null; then
-        local compose_version=$(docker-compose --version | grep -oP '\d+\.\d+\.\d+' | head -1)
+        local compose_version=$(docker-compose --version | sed 's/[^0-9.]*\([0-9.]*\).*/\1/' | head -1)
         print_success "Docker Compose instalado (v$compose_version)"
     elif docker compose version &> /dev/null; then
         print_success "Docker Compose (plugin) instalado"
