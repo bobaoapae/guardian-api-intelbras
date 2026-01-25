@@ -68,6 +68,14 @@ class PartitionStatusInfo(BaseModel):
     state: str = Field(..., description="Partition state: disarmed, armed_away, armed_stay, triggered")
 
 
+class ZoneStatusInfo(BaseModel):
+    """Zone status information."""
+    index: int = Field(..., description="Zone index (0-based)")
+    name: str = Field(..., description="Zone name (e.g., 'Zona 01')")
+    is_open: bool = Field(default=False, description="Whether zone is open/triggered")
+    is_bypassed: bool = Field(default=False, description="Whether zone is bypassed")
+
+
 class AlarmStatusResponse(BaseModel):
     """Alarm status response model."""
     device_id: int = Field(..., description="Device ID")
@@ -77,6 +85,8 @@ class AlarmStatusResponse(BaseModel):
     arm_mode: str = Field(..., description="Current arm mode: disarmed, armed_away, armed_stay")
     is_triggered: bool = Field(..., description="Whether alarm is triggered")
     partitions: List[PartitionStatusInfo] = Field(default_factory=list, description="Partition statuses")
+    partitions_enabled: bool = Field(default=False, description="Whether partitions are enabled on device")
+    zones: List[ZoneStatusInfo] = Field(default_factory=list, description="Zone statuses")
     message: str = Field(..., description="Status message")
     # Eletrificador-specific fields
     is_eletrificador: bool = Field(default=False, description="Whether this is an electric fence device")
@@ -661,6 +671,17 @@ async def get_alarm_status_auto(
             for p in status.partitions
         ]
 
+        # Convert zones to response format
+        zones = [
+            ZoneStatusInfo(
+                index=z["index"],
+                name=f"Zona {z['index'] + 1:02d}",
+                is_open=z.get("open", False),
+                is_bypassed=z.get("bypassed", False)
+            )
+            for z in status.zones
+        ]
+
         return AlarmStatusResponse(
             device_id=device_id,
             model=status.model,
@@ -669,6 +690,8 @@ async def get_alarm_status_auto(
             arm_mode=status.arm_mode,
             is_triggered=status.is_triggered,
             partitions=partitions,
+            partitions_enabled=status.partitions_enabled,
+            zones=zones,
             message="Auto-sync status retrieved successfully",
             # Eletrificador-specific fields
             is_eletrificador=status.is_eletrificador,
