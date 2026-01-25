@@ -106,6 +106,36 @@ print_info() {
 }
 
 #-------------------------------------------------------------------------------
+# Funções Utilitárias
+#-------------------------------------------------------------------------------
+
+get_host_ip() {
+    local ip=""
+
+    # Método 1: ip route (mais confiável no Linux)
+    if command -v ip &> /dev/null; then
+        ip=$(ip route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' | head -1)
+    fi
+
+    # Método 2: hostname -I
+    if [ -z "$ip" ] && command -v hostname &> /dev/null; then
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+
+    # Método 3: ifconfig
+    if [ -z "$ip" ] && command -v ifconfig &> /dev/null; then
+        ip=$(ifconfig 2>/dev/null | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | awk '{print $2}' | head -1)
+    fi
+
+    # Fallback
+    if [ -z "$ip" ]; then
+        ip="localhost"
+    fi
+
+    echo "$ip"
+}
+
+#-------------------------------------------------------------------------------
 # Funções de Interação
 #-------------------------------------------------------------------------------
 
@@ -302,17 +332,17 @@ detect_ha_container() {
         fi
 
         # Encontrar IP do container ou host
-        HA_IP=$(docker inspect "$HA_CONTAINER" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | head -1)
+        HA_IP=$(docker inspect "$HA_CONTAINER" --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null | tr -d '[:space:]')
 
         if [ -z "$HA_IP" ] || [ "$HA_IP" = "" ]; then
             # Container em host network, usar IP do host
-            HA_IP=$(hostname -I | awk '{print $1}')
+            HA_IP=$(get_host_ip)
         fi
 
         print_success "IP do Home Assistant: $HA_IP"
     else
         print_warning "Container do Home Assistant não detectado automaticamente"
-        HA_IP=$(hostname -I | awk '{print $1}')
+        HA_IP=$(get_host_ip)
         print_info "Usando IP do host: $HA_IP"
     fi
 
