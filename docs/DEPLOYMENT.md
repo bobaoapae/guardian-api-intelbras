@@ -108,16 +108,19 @@ Abra http://localhost:8000 no navegador para:
 ## Opção 3: Docker Manual
 
 ```bash
-# Build da imagem
-cd fastapi_middleware
-docker build -t intelbras-guardian-api -f ../docker/Dockerfile .
+# Build da imagem (executar da raiz do projeto)
+docker build -t intelbras-guardian-api -f docker/Dockerfile .
 
 # Rodar container
 docker run -d \
   --name intelbras-guardian-api \
   -p 8000:8000 \
+  -e INTELBRAS_API_URL=https://api-guardian.intelbras.com.br:8443 \
+  -e INTELBRAS_OAUTH_URL=https://api.conta.intelbras.com/auth \
+  -e INTELBRAS_CLIENT_ID=xHCEFEMoQnBcIHcw8ACqbU9aZaYa \
   -e HOST=0.0.0.0 \
   -e PORT=8000 \
+  -e LOG_LEVEL=INFO \
   -e CORS_ORIGINS="http://localhost:8123,http://homeassistant.local:8123" \
   --restart unless-stopped \
   intelbras-guardian-api
