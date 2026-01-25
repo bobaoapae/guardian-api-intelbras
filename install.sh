@@ -29,7 +29,7 @@ set -e
 # Variáveis Globais
 #-------------------------------------------------------------------------------
 
-VERSION="1.0.7"
+VERSION="1.0.8"
 GITHUB_REPO="https://github.com/bobaoapae/guardian-api-intelbras"
 GITHUB_ZIP="https://github.com/bobaoapae/guardian-api-intelbras/archive/refs/heads/main.zip"
 
@@ -108,6 +108,20 @@ print_info() {
 #-------------------------------------------------------------------------------
 # Funções Utilitárias
 #-------------------------------------------------------------------------------
+
+# Variável global para o comando docker compose
+DOCKER_COMPOSE=""
+
+get_docker_compose_cmd() {
+    # Detectar se é docker-compose (standalone) ou docker compose (plugin)
+    if command -v docker-compose &> /dev/null; then
+        echo "docker-compose"
+    elif docker compose version &> /dev/null 2>&1; then
+        echo "docker compose"
+    else
+        echo ""
+    fi
+}
 
 get_host_ip() {
     local ip=""
@@ -242,13 +256,9 @@ check_prerequisites() {
     fi
 
     # Docker Compose
-    if command -v docker-compose &> /dev/null; then
-        local compose_version=$(docker-compose --version | sed 's/[^0-9.]*\([0-9.]*\).*/\1/' | head -1)
-        print_success "Docker Compose instalado (v$compose_version)"
-    elif docker compose version &> /dev/null; then
-        print_success "Docker Compose (plugin) instalado"
-        # Criar alias para compatibilidade
-        alias docker-compose='docker compose'
+    DOCKER_COMPOSE=$(get_docker_compose_cmd)
+    if [ -n "$DOCKER_COMPOSE" ]; then
+        print_success "Docker Compose instalado ($DOCKER_COMPOSE)"
     else
         missing+=("docker-compose")
         print_error "Docker Compose não encontrado"
@@ -631,15 +641,15 @@ start_services() {
 
     print_info "Construindo imagem Docker..."
     if [ "$DEPLOY_MODE" = "standalone" ]; then
-        docker-compose -f docker/docker-compose.yml -f docker-compose.override.yml build
+        $DOCKER_COMPOSE -f docker/docker-compose.yml -f docker-compose.override.yml build
     else
-        docker-compose build 2>/dev/null || docker build -t intelbras-guardian-api -f docker/Dockerfile .
+        $DOCKER_COMPOSE build 2>/dev/null || docker build -t intelbras-guardian-api -f docker/Dockerfile .
     fi
     print_success "Imagem construída!"
 
     print_info "Iniciando container..."
     if [ "$DEPLOY_MODE" = "standalone" ]; then
-        docker-compose -f docker/docker-compose.yml -f docker-compose.override.yml up -d
+        $DOCKER_COMPOSE -f docker/docker-compose.yml -f docker-compose.override.yml up -d
     else
         print_warning "Para modo integrado, inicie via seu docker-compose do HA"
         return
@@ -727,6 +737,14 @@ setup_systemd() {
 
     local service_file="/etc/systemd/system/intelbras-guardian.service"
 
+    # Determinar comando correto para systemd
+    local systemd_compose_cmd
+    if [ "$DOCKER_COMPOSE" = "docker compose" ]; then
+        systemd_compose_cmd="/usr/bin/docker compose"
+    else
+        systemd_compose_cmd="/usr/bin/docker-compose"
+    fi
+
     cat > "$service_file" << EOF
 [Unit]
 Description=Intelbras Guardian API
@@ -737,8 +755,8 @@ After=docker.service
 Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=/usr/bin/docker-compose -f docker/docker-compose.yml -f docker-compose.override.yml up -d
-ExecStop=/usr/bin/docker-compose -f docker/docker-compose.yml -f docker-compose.override.yml down
+ExecStart=${systemd_compose_cmd} -f docker/docker-compose.yml -f docker-compose.override.yml up -d
+ExecStop=${systemd_compose_cmd} -f docker/docker-compose.yml -f docker-compose.override.yml down
 TimeoutStartSec=0
 
 [Install]
@@ -809,11 +827,11 @@ print_summary() {
     echo "║    docker restart intelbras-guardian-api                         ║"
     echo "║                                                                  ║"
     echo "║  • Parar:                                                        ║"
-    echo "║    cd ${INSTALL_DIR} && docker-compose down                      "
+    echo "║    cd ${INSTALL_DIR} && $DOCKER_COMPOSE down                      "
     echo "║                                                                  ║"
     echo "║  • Atualizar:                                                    ║"
     echo "║    cd ${INSTALL_DIR} && git pull && \\                           "
-    echo "║    docker-compose up -d --build                                  ║"
+    echo "║    $DOCKER_COMPOSE up -d --build                                  ║"
     echo "║                                                                  ║"
     echo "╚══════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
@@ -936,8 +954,8 @@ update() {
 
     # Rebuild container
     print_info "Reconstruindo container..."
-    docker-compose -f docker/docker-compose.yml -f docker-compose.override.yml build
-    docker-compose -f docker/docker-compose.yml -f docker-compose.override.yml up -d
+    $DOCKER_COMPOSE -f docker/docker-compose.yml -f docker-compose.override.yml build
+    $DOCKER_COMPOSE -f docker/docker-compose.yml -f docker-compose.override.yml up -d
     print_success "Container atualizado"
 
     # Atualizar integração HA
