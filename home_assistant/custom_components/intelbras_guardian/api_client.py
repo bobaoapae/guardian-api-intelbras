@@ -1,6 +1,8 @@
 """API client for FastAPI middleware."""
+import asyncio
+import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional
 import aiohttp
 import async_timeout
 
@@ -409,3 +411,94 @@ class GuardianApiClient:
     def set_session_id(self, session_id: str) -> None:
         """Set the session ID (for restoring from config)."""
         self._session_id = session_id
+
+    async def listen_sse_events(
+        self,
+        on_event: Callable[[Dict[str, Any]], None],
+        stop_event: asyncio.Event,
+    ) -> None:
+        """Listen to Server-Sent Events (SSE) stream for real-time updates.
+
+        Args:
+            on_event: Callback function called for each event received
+            stop_event: Event to signal when to stop listening
+
+        The SSE endpoint sends events in the format:
+            data: {"event_type": "alarm_event", "data": {...}}
+        """
+        if not self._session_id:
+            _LOGGER.warning("Cannot connect to SSE: not authenticated")
+            return
+
+        url = f"{self._base_url}/api/v1/events/stream"
+        headers = {"X-Session-ID": self._session_id}
+
+        reconnect_delay = 1
+        max_reconnect_delay = 60
+
+        while not stop_event.is_set():
+            try:
+                _LOGGER.debug("Connecting to SSE stream at %s", url)
+
+                async with self._session.get(
+                    url,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=None, sock_read=90),
+                ) as response:
+                    if response.status == 401:
+                        _LOGGER.warning("SSE connection unauthorized - session expired")
+                        break
+
+                    if response.status != 200:
+                        _LOGGER.error("SSE connection failed with status %d", response.status)
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+                        continue
+
+                    _LOGGER.info("SSE stream connected successfully")
+                    reconnect_delay = 1  # Reset on successful connection
+
+                    # Read SSE stream
+                    async for line in response.content:
+                        if stop_event.is_set():
+                            break
+
+                        line = line.decode("utf-8").strip()
+
+                        # Skip empty lines and comments
+                        if not line or line.startswith(":"):
+                            continue
+
+                        # Parse SSE data line
+                        if line.startswith("data:"):
+                            data_str = line[5:].strip()
+                            if data_str:
+                                try:
+                                    event_data = json.loads(data_str)
+                                    event_type = event_data.get("event_type", "")
+
+                                    # Only process alarm events
+                                    if event_type == "alarm_event":
+                                        _LOGGER.debug("SSE alarm event received: %s", event_data)
+                                        on_event(event_data.get("data", {}))
+
+                                except json.JSONDecodeError as e:
+                                    _LOGGER.debug("SSE non-JSON data: %s", data_str[:100])
+
+            except asyncio.CancelledError:
+                _LOGGER.debug("SSE listener cancelled")
+                break
+
+            except aiohttp.ClientError as e:
+                _LOGGER.warning("SSE connection error: %s", e)
+                if not stop_event.is_set():
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+
+            except Exception as e:
+                _LOGGER.error("SSE unexpected error: %s", e)
+                if not stop_event.is_set():
+                    await asyncio.sleep(reconnect_delay)
+                    reconnect_delay = min(reconnect_delay * 2, max_reconnect_delay)
+
+        _LOGGER.info("SSE listener stopped")

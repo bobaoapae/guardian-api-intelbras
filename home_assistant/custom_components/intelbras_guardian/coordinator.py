@@ -1,17 +1,18 @@
 """Data update coordinator for Intelbras Guardian."""
+import asyncio
 import logging
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
 
 from .api_client import GuardianApiClient
-from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, EVENT_ALARM
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +37,56 @@ class GuardianCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._last_event_id: Optional[int] = None
 
+        # SSE listener
+        self._sse_task: Optional[asyncio.Task] = None
+        self._sse_stop_event: Optional[asyncio.Event] = None
+
+    async def start_sse_listener(self) -> None:
+        """Start SSE listener for real-time events."""
+        if self._sse_task is not None:
+            _LOGGER.debug("SSE listener already running")
+            return
+
+        if not self.client.session_id:
+            _LOGGER.debug("Cannot start SSE: not authenticated")
+            return
+
+        self._sse_stop_event = asyncio.Event()
+        self._sse_task = asyncio.create_task(
+            self.client.listen_sse_events(
+                on_event=self._on_sse_event,
+                stop_event=self._sse_stop_event,
+            )
+        )
+        _LOGGER.info("SSE listener started for real-time alarm events")
+
+    async def stop_sse_listener(self) -> None:
+        """Stop SSE listener."""
+        if self._sse_stop_event:
+            self._sse_stop_event.set()
+
+        if self._sse_task:
+            self._sse_task.cancel()
+            try:
+                await self._sse_task
+            except asyncio.CancelledError:
+                pass
+            self._sse_task = None
+
+        self._sse_stop_event = None
+        _LOGGER.debug("SSE listener stopped")
+
+    @callback
+    def _on_sse_event(self, event_data: Dict[str, Any]) -> None:
+        """Handle SSE alarm event - trigger immediate refresh."""
+        _LOGGER.info("SSE alarm event received, triggering refresh: %s", event_data)
+
+        # Fire a Home Assistant event for automations
+        self.hass.bus.async_fire(EVENT_ALARM, event_data)
+
+        # Trigger an immediate coordinator refresh
+        self.hass.async_create_task(self.async_request_refresh())
+
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from API."""
         try:
@@ -44,6 +95,8 @@ class GuardianCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning(
                     "No active session. Please re-authenticate via integration options."
                 )
+                # Stop SSE listener if session expired
+                await self.stop_sse_listener()
                 return {
                     "devices": {},
                     "partitions": [],
@@ -58,6 +111,8 @@ class GuardianCoordinator(DataUpdateCoordinator):
             devices = await self.client.get_devices()
             if not devices:
                 _LOGGER.warning("No devices found or session may be invalid")
+                # Stop SSE listener if session seems invalid
+                await self.stop_sse_listener()
                 return {
                     "devices": {},
                     "partitions": [],
@@ -67,6 +122,10 @@ class GuardianCoordinator(DataUpdateCoordinator):
                     "last_event": None,
                     "needs_reauth": True,
                 }
+
+            # Start SSE listener if not already running (for real-time events)
+            if self._sse_task is None:
+                await self.start_sse_listener()
 
             # Get events
             events = await self.client.get_events(limit=20)

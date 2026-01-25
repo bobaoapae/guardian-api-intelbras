@@ -68,3 +68,6 @@ ZONE_TYPE_DEVICE_CLASS = {
 
 # Platforms
 PLATFORMS = ["alarm_control_panel", "binary_sensor", "sensor", "switch"]
+
+# Events
+EVENT_ALARM = f"{DOMAIN}_alarm_event"
