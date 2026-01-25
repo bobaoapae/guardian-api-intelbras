@@ -1,0 +1,1898 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelbras Guardian - Test UI</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: #00d4ff; margin-bottom: 20px; text-align: center; }
+        h2 { color: #00d4ff; margin: 20px 0 10px; font-size: 1.2em; }
+        .card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; color: #aaa; }
+        input[type="text"], input[type="password"], input[type="email"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #333;
+            border-radius: 5px;
+            background: #0f0f23;
+            color: #eee;
+        }
+        button {
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-right: 10px;
+            margin-bottom: 10px;
+        }
+        button:hover { background: #00b8e6; }
+        button:disabled { background: #444; color: #888; cursor: not-allowed; }
+        button.danger { background: #ff4757; color: #fff; }
+        button.danger:hover { background: #ff3344; }
+        button.warning { background: #ffa502; color: #000; }
+        button.warning:hover { background: #ff9500; }
+        button.success { background: #2ed573; color: #000; }
+        button.success:hover { background: #26c766; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .status.success { background: rgba(46, 213, 115, 0.2); border: 1px solid #2ed573; }
+        .status.error { background: rgba(255, 71, 87, 0.2); border: 1px solid #ff4757; }
+        .status.info { background: rgba(0, 212, 255, 0.2); border: 1px solid #00d4ff; }
+        .device-card {
+            background: #0f3460;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+        }
+        .device-card h3 { color: #00d4ff; margin-bottom: 10px; }
+        .partition {
+            background: #1a1a2e;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 5px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .partition-status {
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .partition-status.armed { background: #ff4757; }
+        .partition-status.disarmed { background: #2ed573; color: #000; }
+        .partition-status.stay { background: #ffa502; color: #000; }
+        .event-list { max-height: 300px; overflow-y: auto; }
+        .event-item {
+            background: #0f3460;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 5px 0;
+            font-size: 0.9em;
+        }
+        .event-item .time { color: #aaa; font-size: 0.8em; }
+        pre {
+            background: #0f0f23;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 0.85em;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        @media (max-width: 768px) { .grid { grid-template-columns: 1fr; } }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.75em;
+            margin-left: 10px;
+        }
+        .badge.online { background: #2ed573; color: #000; }
+        .badge.offline { background: #ff4757; }
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .modal {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 25px;
+            max-width: 400px;
+            width: 90%;
+        }
+        .modal h3 { color: #00d4ff; margin-bottom: 15px; }
+        .modal p { color: #aaa; font-size: 0.9em; margin-bottom: 15px; }
+        .modal .form-group { margin-bottom: 15px; }
+        .modal .buttons { display: flex; gap: 10px; justify-content: flex-end; }
+        .new-event {
+            animation: highlight 2s ease-out;
+            border-left: 3px solid #ff4757;
+        }
+        @keyframes highlight {
+            0% { background: rgba(255, 71, 87, 0.3); }
+            100% { background: transparent; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container" x-data="guardianApp()">
+        <h1>Intelbras Guardian - Test UI</h1>
+
+        <!-- Open Zones Error Modal -->
+        <div class="modal-overlay" x-show="showOpenZonesModal" x-cloak>
+            <div class="modal" style="max-width: 500px;">
+                <h3 style="color: #ff4757;">Zonas Abertas</h3>
+                <p>Nao e possivel armar o alarme. Feche as seguintes zonas:</p>
+                <div style="max-height: 300px; overflow-y: auto; margin: 15px 0;">
+                    <template x-for="zone in openZones" :key="zone.index">
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px; margin: 5px 0; display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <strong x-text="zone.friendly_name || zone.name"></strong>
+                                <span style="color: #aaa; font-size: 0.85em;" x-text="zone.friendly_name ? ' (' + zone.name + ')' : ''"></span>
+                            </div>
+                            <span class="badge" style="background: #ff4757;">ABERTA</span>
+                        </div>
+                    </template>
+                </div>
+                <div class="buttons">
+                    <button @click="showOpenZonesModal = false">Fechar</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Zone Editor Modal -->
+        <div class="modal-overlay" x-show="showZoneEditorModal" x-cloak>
+            <div class="modal" style="max-width: 600px;">
+                <h3>Gerenciar Zonas</h3>
+                <p style="color: #aaa; font-size: 0.9em;">Configure nomes personalizados para cada zona.</p>
+
+                <div style="max-height: 400px; overflow-y: auto; margin: 15px 0;">
+                    <template x-for="zone in editingZones" :key="zone.index">
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px; margin: 5px 0;">
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <span style="min-width: 70px; color: #aaa;" x-text="zone.name"></span>
+                                <input type="text" x-model="zone.friendly_name"
+                                       :placeholder="'Nome personalizado...'"
+                                       style="flex: 1; padding: 8px;">
+                                <span class="badge" :class="zone.is_open ? '' : 'online'"
+                                      :style="zone.is_open ? 'background: #ff4757;' : ''"
+                                      x-text="zone.is_open ? 'ABERTA' : 'OK'"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+
+                <div class="buttons">
+                    <button class="danger" @click="showZoneEditorModal = false">Cancelar</button>
+                    <button class="success" @click="saveZoneFriendlyNames" :disabled="loading">
+                        Salvar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Password Modal -->
+        <div class="modal-overlay" x-show="showPasswordModal" x-cloak>
+            <div class="modal">
+                <h3 x-text="passwordModalTitle"></h3>
+                <p x-text="passwordModalMessage"></p>
+                <div class="form-group">
+                    <label>Senha do Painel (4-6 digitos)</label>
+                    <input type="password" x-model="alarmPassword" placeholder="******"
+                           maxlength="6" @keyup.enter="confirmPasswordModal">
+                </div>
+                <div class="form-group" x-show="!alarmPassword || alarmPassword.length < 4">
+                    <small style="color: #ff4757;">Digite a senha do painel de alarme (4-6 digitos)</small>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" x-model="savePasswordChecked" style="width: auto;">
+                        <span>Salvar senha para sincronizacao automatica</span>
+                    </label>
+                    <small style="color: #aaa;">A senha sera salva com suas credenciais e usada para atualizar o status automaticamente.</small>
+                </div>
+                <div class="buttons">
+                    <button class="danger" @click="cancelPasswordModal">Cancelar</button>
+                    <button class="success" @click="confirmPasswordModal"
+                            :disabled="!alarmPassword || alarmPassword.length < 4">
+                        Confirmar
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Login Section -->
+        <div class="card" x-show="!sessionId">
+            <h2>Login</h2>
+
+            <!-- OAuth Login (Recommended) -->
+            <div class="oauth-section" style="margin-bottom: 20px;">
+                <h3 style="color: #2ed573; margin-bottom: 10px;">Metodo 1: OAuth (Recomendado)</h3>
+                <p style="color: #aaa; font-size: 0.9em; margin-bottom: 10px;">
+                    Clique no botao abaixo para abrir a pagina de login da Intelbras.
+                </p>
+
+                <!-- Step 1: Start OAuth -->
+                <div x-show="!oauthState">
+                    <button @click="startOAuth" :disabled="loading" class="success">
+                        <span x-show="!loading">Iniciar Login OAuth</span>
+                        <span x-show="loading">Aguarde...</span>
+                    </button>
+                </div>
+
+                <!-- Step 2: Show URL and wait for callback -->
+                <div x-show="oauthState" style="margin-top: 10px;">
+                    <div class="status info">
+                        <strong>Passo 1:</strong> Abra a URL abaixo no navegador e faca login:
+                    </div>
+                    <div style="background: #0f0f23; padding: 10px; border-radius: 5px; margin: 10px 0; word-break: break-all;">
+                        <a :href="oauthUrl" target="_blank" style="color: #00d4ff;" x-text="oauthUrl"></a>
+                    </div>
+                    <button @click="window.open(oauthUrl, '_blank')" class="success" style="margin-bottom: 10px;">
+                        Abrir URL no Navegador
+                    </button>
+
+                    <div class="status info" style="margin-top: 10px;">
+                        <strong>Passo 2:</strong> Apos o login, cole a URL de retorno ou o codigo aqui:
+                    </div>
+
+                    <div class="form-group" style="margin-top: 10px;">
+                        <label>URL de Callback ou Codigo</label>
+                        <input type="text" x-model="callbackInput"
+                               placeholder="Cole a URL completa ou apenas o codigo...">
+                    </div>
+
+                    <button @click="completeOAuth" :disabled="loading || !callbackInput">
+                        <span x-show="!loading">Completar Login</span>
+                        <span x-show="loading">Processando...</span>
+                    </button>
+                    <button @click="cancelOAuth" class="danger">Cancelar</button>
+                </div>
+            </div>
+
+            <hr style="border-color: #333; margin: 20px 0;">
+
+            <!-- Password Login (Fallback) -->
+            <div class="password-section">
+                <h3 style="color: #ffa502; margin-bottom: 10px;">Metodo 2: Email/Senha (Fallback)</h3>
+                <p style="color: #aaa; font-size: 0.9em; margin-bottom: 10px;">
+                    Este metodo pode nao funcionar dependendo da configuracao da conta.
+                </p>
+                <form @submit.prevent="login">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" x-model="credentials.username" placeholder="seu@email.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Senha</label>
+                        <input type="password" x-model="credentials.password" placeholder="******">
+                    </div>
+                    <button type="submit" :disabled="loading" class="warning">
+                        <span x-show="!loading">Login com Senha</span>
+                        <span x-show="loading">Aguarde...</span>
+                    </button>
+                </form>
+            </div>
+
+            <div class="status error" x-show="error" x-text="error"></div>
+        </div>
+
+        <!-- Logged In Section -->
+        <template x-if="sessionId">
+            <div>
+                <!-- Session Info -->
+                <div class="card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>Sessao ativa</strong>
+                            <span class="badge online">Conectado</span>
+                        </div>
+                        <div>
+                            <button @click="loadDevices" :disabled="loading">Atualizar</button>
+                            <button class="danger" @click="logout">Sair</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid">
+                    <!-- Devices Section -->
+                    <div class="card">
+                        <h2>Dispositivos</h2>
+                        <div x-show="loading" class="status info">Carregando...</div>
+                        <template x-for="device in devices" :key="device.id">
+                            <div class="device-card">
+                                <h3>
+                                    <span x-text="device.description"></span>
+                                    <span class="badge" :class="device.is_online ? 'online' : 'offline'"
+                                          x-text="device.is_online ? 'Online' : 'Offline'"></span>
+                                    <span x-show="device.has_saved_password" class="badge" style="background: #00d4ff; color: #000;">
+                                        Senha Salva
+                                    </span>
+                                </h3>
+                                <div style="font-size: 0.8em; color: #aaa; margin-bottom: 10px;">
+                                    ID: <span x-text="device.id"></span> |
+                                    MAC: <span x-text="device.mac || 'N/A'"></span> |
+                                    Modelo: <span x-text="device.model || 'N/A'"></span>
+                                    <template x-if="device.has_saved_password">
+                                        <span>
+                                            | <a href="#" @click.prevent="forgetDevicePassword(device.id)" style="color: #ff4757;">Esquecer Senha</a>
+                                        </span>
+                                    </template>
+                                </div>
+
+                                <!-- Eletrificador (cerca eletrica) - sem particoes -->
+                                <template x-if="isEletrificador(device)">
+                                    <div>
+                                        <div style="margin-bottom: 10px;">
+                                            <!-- Auto-sync button for devices with saved password -->
+                                            <template x-if="device.has_saved_password">
+                                                <button @click="autoSyncStatus(device.id)"
+                                                        :disabled="loading" class="success" title="Sincronizar automaticamente com senha salva">
+                                                    Sincronizar Status
+                                                </button>
+                                            </template>
+                                            <!-- Manual status button (always available) -->
+                                            <button @click="requestPassword('Obter Status do Eletrificador', 'Digite a senha para obter o status atual.', {type: 'get_status', deviceId: device.id})"
+                                                    :disabled="loading" title="Obter status em tempo real">
+                                                <span x-text="device.has_saved_password ? 'Status (Manual)' : 'Atualizar Status'"></span>
+                                            </button>
+                                        </div>
+                                        <!-- CHOQUE (Shock/Fence) -->
+                                        <div class="partition">
+                                            <div>
+                                                <strong>Choque (Cerca)</strong>
+                                                <span class="partition-status"
+                                                      :class="getEletrificadorShockClass(device)"
+                                                      x-text="getEletrificadorShockText(device)"></span>
+                                                <template x-if="device.shock_triggered">
+                                                    <span class="partition-status armed" style="margin-left: 5px;">DISPARADO!</span>
+                                                </template>
+                                            </div>
+                                            <div>
+                                                <button class="danger" @click="controlEletrificador(device.id, 'on')"
+                                                        :disabled="loading" title="Ligar Choque">
+                                                    Ligar
+                                                </button>
+                                                <button class="success" @click="controlEletrificador(device.id, 'off')"
+                                                        :disabled="loading" title="Desligar Choque">
+                                                    Desligar
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <!-- ALARME (Alarm) -->
+                                        <div class="partition" style="margin-top: 10px;">
+                                            <div>
+                                                <strong>Alarme</strong>
+                                                <span class="partition-status"
+                                                      :class="getEletrificadorAlarmClass(device)"
+                                                      x-text="getEletrificadorAlarmText(device)"></span>
+                                                <template x-if="device.alarm_triggered">
+                                                    <span class="partition-status armed" style="margin-left: 5px;">DISPARADO!</span>
+                                                </template>
+                                            </div>
+                                            <div>
+                                                <button class="danger" @click="controlEletrificadorAlarm(device.id, 'activate')"
+                                                        :disabled="loading" title="Armar Alarme">
+                                                    Armar
+                                                </button>
+                                                <button class="success" @click="controlEletrificadorAlarm(device.id, 'deactivate')"
+                                                        :disabled="loading" title="Desarmar Alarme">
+                                                    Desarmar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Alarme com Partitions -->
+                                <template x-if="!isEletrificador(device) && device.partitions && device.partitions.length > 0">
+                                    <div>
+                                        <div style="margin-bottom: 10px;">
+                                            <!-- Auto-sync button for devices with saved password -->
+                                            <template x-if="device.has_saved_password">
+                                                <button @click="autoSyncStatus(device.id)"
+                                                        :disabled="loading" class="success" title="Sincronizar automaticamente com senha salva">
+                                                    Sincronizar Status
+                                                </button>
+                                            </template>
+                                            <!-- Manual status button (always available) -->
+                                            <button @click="requestPassword('Obter Status em Tempo Real', 'Digite a senha do painel para obter o status atual via ISECNet.', {type: 'get_status', deviceId: device.id})"
+                                                    :disabled="loading" title="Obter status em tempo real via ISECNet">
+                                                <span x-text="device.has_saved_password ? 'Status (Manual)' : 'Atualizar Status (ISECNet)'"></span>
+                                            </button>
+                                        </div>
+                                        <template x-for="partition in device.partitions" :key="partition.id">
+                                            <div class="partition">
+                                                <div>
+                                                    <strong x-text="partition.name || 'Particao ' + partition.id"></strong>
+                                                    <span class="partition-status"
+                                                          :class="getPartitionStatusClass(partition.status)"
+                                                          x-text="getPartitionStatusText(partition.status)"></span>
+                                                </div>
+                                                <div>
+                                                    <button class="danger" @click="armPartition(device.id, partition.id, 'away')"
+                                                            :disabled="loading" title="Armar Total - todas as zonas">
+                                                        Armar Total
+                                                    </button>
+                                                    <button class="warning" @click="armPartition(device.id, partition.id, 'home')"
+                                                            :disabled="loading" title="Armar Parcial - só perimetro">
+                                                        Armar Parcial
+                                                    </button>
+                                                    <button class="success" @click="disarmPartition(device.id, partition.id)"
+                                                            :disabled="loading" title="Desarmar">
+                                                        Desarmar
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+
+                                <!-- Dispositivo sem particoes e nao eh eletrificador -->
+                                <template x-if="!isEletrificador(device) && (!device.partitions || device.partitions.length === 0)">
+                                    <div class="partition">
+                                        <div style="color: #aaa;">
+                                            Este dispositivo nao possui particoes para controle.
+                                        </div>
+                                    </div>
+                                </template>
+
+                                <!-- Zones management -->
+                                <div style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #333;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <span style="font-size: 0.85em; color: #aaa;">
+                                            Zonas/Setores: <span x-text="getZoneCountForModel(device.model)"></span>
+                                        </span>
+                                        <button @click="openZoneEditor(device.id)" :disabled="loading"
+                                                style="padding: 5px 10px; font-size: 0.85em;">
+                                            Gerenciar Zonas
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                        <div x-show="devices.length === 0 && !loading" class="status info">
+                            Nenhum dispositivo encontrado. Clique em "Atualizar".
+                        </div>
+                    </div>
+
+                    <!-- Events Section -->
+                    <div class="card">
+                        <h2>Eventos Recentes</h2>
+                        <div style="display: flex; gap: 10px; margin-bottom: 10px; align-items: center;">
+                            <button @click="loadEvents" :disabled="loading">
+                                Carregar Eventos
+                            </button>
+                            <button @click="toggleEventStream" :class="eventStreamConnected ? 'danger' : 'success'">
+                                <span x-text="eventStreamConnected ? 'Desconectar Stream' : 'Conectar Tempo Real'"></span>
+                            </button>
+                            <span x-show="eventStreamConnected" class="badge online" style="margin-left: 5px;">
+                                TEMPO REAL
+                            </span>
+                        </div>
+                        <div class="event-list">
+                            <template x-for="event in events" :key="event.id">
+                                <div class="event-item" :class="event.is_new ? 'new-event' : ''">
+                                    <div class="time" x-text="formatDate(event.timestamp)"></div>
+                                    <div>
+                                        <span x-show="event.is_alarm" style="color: #ff4757;">DISPARO: </span>
+                                        <span x-text="event.notification?.title || event.event_type || event.event_name || 'Evento'"></span>
+                                    </div>
+                                    <div style="color: #aaa; font-size: 0.85em;">
+                                        <span x-text="event.notification?.message || ''"></span>
+                                        <span x-show="event.zone?.name" x-text="' - Zona: ' + (event.zone?.friendly_name || event.zone?.name)"></span>
+                                    </div>
+                                </div>
+                            </template>
+                            <div x-show="events.length === 0" class="status info">
+                                Nenhum evento carregado. Clique em "Carregar Eventos" ou "Conectar Tempo Real".
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Status Messages -->
+                <div class="card" x-show="message">
+                    <div class="status" :class="messageType" x-text="message"></div>
+                </div>
+
+                <!-- Debug Section -->
+                <div class="card">
+                    <h2>Debug</h2>
+                    <button @click="showDebug = !showDebug">
+                        <span x-text="showDebug ? 'Ocultar' : 'Mostrar'"></span> Debug
+                    </button>
+                    <div x-show="showDebug">
+                        <h3 style="margin-top: 15px;">Ultima Resposta</h3>
+                        <pre x-text="JSON.stringify(lastResponse, null, 2)"></pre>
+                    </div>
+                </div>
+            </div>
+        </template>
+    </div>
+
+    <script>
+        function guardianApp() {
+            return {
+                // State
+                sessionId: null,
+                credentials: { username: '', password: '' },
+                devices: [],
+                events: [],
+                loading: false,
+                error: null,
+                message: null,
+                messageType: 'info',
+                showDebug: false,
+                lastResponse: null,
+
+                // OAuth state
+                oauthState: null,
+                oauthUrl: null,
+                callbackInput: '',
+
+                // Event stream state
+                eventSource: null,
+                eventStreamConnected: false,
+
+                // Password modal state
+                showPasswordModal: false,
+                passwordModalTitle: '',
+                passwordModalMessage: '',
+                alarmPassword: '',
+                savePasswordChecked: false,
+                pendingAction: null,  // {type, deviceId, partitionId, mode}
+
+                // Open zones modal state
+                showOpenZonesModal: false,
+                openZones: [],
+
+                // Zone editor modal state
+                showZoneEditorModal: false,
+                editingDeviceId: null,
+                editingZones: [],
+
+                // API base URL
+                apiUrl: window.location.origin,
+
+                // Check if we got an OAuth callback on page load
+                async init() {
+                    // Check URL for OAuth callback first
+                    const params = new URLSearchParams(window.location.search);
+                    const code = params.get('code');
+                    const state = params.get('state');
+                    if (code && state) {
+                        this.callbackInput = window.location.href;
+                        this.oauthState = state;
+                        await this.completeOAuth();
+                        return;
+                    }
+
+                    // Check for session in localStorage
+                    const savedSession = localStorage.getItem('session_id');
+                    if (savedSession) {
+                        // Verify session is still valid
+                        try {
+                            const response = await fetch(`${this.apiUrl}/api/v1/auth/session`, {
+                                headers: { 'X-Session-ID': savedSession }
+                            });
+                            if (response.ok) {
+                                this.sessionId = savedSession;
+                                this.loadDevices();
+
+                                // Request notification permission for alarms
+                                this.requestNotificationPermission();
+                            } else {
+                                // Session invalid, clear it
+                                localStorage.removeItem('session_id');
+                                this.showMessage('Sessao anterior expirada. Faca login novamente.', 'info');
+                            }
+                        } catch (e) {
+                            localStorage.removeItem('session_id');
+                        }
+                    }
+                },
+
+                // Start OAuth flow
+                async startOAuth() {
+                    this.loading = true;
+                    this.error = null;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/auth/start`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' }
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Failed to start OAuth');
+                        }
+
+                        this.oauthState = data.state;
+                        this.oauthUrl = data.auth_url;
+                        this.showMessage('OAuth iniciado. Abra a URL no navegador.', 'info');
+                    } catch (e) {
+                        this.error = e.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Complete OAuth with callback code
+                async completeOAuth() {
+                    this.loading = true;
+                    this.error = null;
+                    try {
+                        let code = this.callbackInput;
+                        let state = this.oauthState;
+
+                        // Check if input is a URL
+                        if (this.callbackInput.includes('?') || this.callbackInput.includes('code=')) {
+                            // Use callback-url endpoint
+                            const response = await fetch(`${this.apiUrl}/api/v1/auth/callback-url`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ callback_url: this.callbackInput })
+                            });
+                            const data = await response.json();
+                            this.lastResponse = data;
+
+                            if (!response.ok) {
+                                throw new Error(data.detail || 'OAuth callback failed');
+                            }
+
+                            this.sessionId = data.session_id;
+                            localStorage.setItem('session_id', data.session_id);
+                        } else {
+                            // Input is just the code
+                            const response = await fetch(`${this.apiUrl}/api/v1/auth/callback`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ code: code, state: state })
+                            });
+                            const data = await response.json();
+                            this.lastResponse = data;
+
+                            if (!response.ok) {
+                                throw new Error(data.detail || 'OAuth callback failed');
+                            }
+
+                            this.sessionId = data.session_id;
+                            localStorage.setItem('session_id', data.session_id);
+                        }
+
+                        // Clear OAuth state
+                        this.oauthState = null;
+                        this.oauthUrl = null;
+                        this.callbackInput = '';
+
+                        // Clear URL params
+                        window.history.replaceState({}, document.title, window.location.pathname);
+
+                        this.showMessage('Login OAuth realizado com sucesso!', 'success');
+                        await this.loadDevices();
+                    } catch (e) {
+                        this.error = e.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Cancel OAuth flow
+                cancelOAuth() {
+                    this.oauthState = null;
+                    this.oauthUrl = null;
+                    this.callbackInput = '';
+                    this.error = null;
+                },
+
+                // Login with password (fallback)
+                async login() {
+                    this.loading = true;
+                    this.error = null;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/auth/login`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(this.credentials)
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Login failed');
+                        }
+
+                        this.sessionId = data.session_id;
+                        localStorage.setItem('session_id', data.session_id);
+                        this.credentials.password = '';
+                        this.showMessage('Login realizado com sucesso!', 'success');
+                        await this.loadDevices();
+                    } catch (e) {
+                        this.error = e.message;
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Logout
+                async logout() {
+                    // Disconnect event stream first
+                    this.disconnectEventStream();
+
+                    try {
+                        await fetch(`${this.apiUrl}/api/v1/auth/logout`, {
+                            method: 'POST',
+                            headers: { 'X-Session-ID': this.sessionId }
+                        });
+                    } catch (e) {
+                        console.error('Logout error:', e);
+                    }
+                    this.sessionId = null;
+                    this.devices = [];
+                    this.events = [];
+                    localStorage.removeItem('session_id');
+                },
+
+                // Load devices
+                async loadDevices() {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/devices`, {
+                            headers: { 'X-Session-ID': this.sessionId }
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        // Handle session expired
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Failed to load devices');
+                        }
+
+                        this.devices = data.devices || [];
+                        this.showMessage(`${this.devices.length} dispositivo(s) encontrado(s)`, 'success');
+
+                        // Auto-sync devices sequentially (parallel causes connection conflicts)
+                        this.autoSyncAllDevices();
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Auto-sync all devices sequentially to avoid connection conflicts
+                async autoSyncAllDevices() {
+                    let syncedAny = false;
+                    for (const device of this.devices) {
+                        if (device.has_saved_password) {
+                            // Auto-sync using saved password (sequential to avoid conflicts)
+                            await this.autoSyncStatusSilent(device.id);
+                            syncedAny = true;
+                        } else if (!this.isEletrificador(device)) {
+                            // Fallback to cloud partition status (only for alarms without saved password)
+                            await this.loadPartitionStatus(device.id);
+                        }
+                    }
+
+                    // Reload devices to get updated partitions_enabled from cache
+                    // This ensures single-partition devices show correctly after first sync
+                    if (syncedAny) {
+                        console.log('Auto-sync complete, reloading devices list...');
+                        await this.reloadDevicesList();
+                    }
+                },
+
+                // Reload devices list without triggering another auto-sync
+                async reloadDevicesList() {
+                    console.log('reloadDevicesList() called');
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/devices`, {
+                            headers: { 'X-Session-ID': this.sessionId }
+                        });
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            console.log('Reloaded devices:', data.devices.map(d => ({
+                                id: d.id,
+                                partitions_enabled: d.partitions_enabled,
+                                partitions_count: d.partitions?.length
+                            })));
+                            // Preserve current status from synced devices
+                            const oldDevices = this.devices;
+                            this.devices = data.devices || [];
+
+                            // Restore status from old devices (preserves sync results)
+                            for (const newDevice of this.devices) {
+                                const oldDevice = oldDevices.find(d => d.id === newDevice.id);
+                                if (oldDevice) {
+                                    newDevice.status = oldDevice.status;
+                                    newDevice.shock_enabled = oldDevice.shock_enabled;
+                                    newDevice.alarm_enabled = oldDevice.alarm_enabled;
+                                    newDevice.shock_triggered = oldDevice.shock_triggered;
+                                    newDevice.alarm_triggered = oldDevice.alarm_triggered;
+                                    // Update partition statuses
+                                    if (oldDevice.partitions && newDevice.partitions) {
+                                        for (const newPart of newDevice.partitions) {
+                                            const oldPart = oldDevice.partitions.find(p => p.id === newPart.id);
+                                            if (oldPart) {
+                                                newPart.status = oldPart.status;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            console.log('Devices list reloaded with updated partition info');
+                        }
+                    } catch (e) {
+                        console.error('Error reloading devices:', e);
+                    }
+                },
+
+                // Silent auto-sync (no message on success, only on error)
+                async autoSyncStatusSilent(deviceId) {
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/status/auto`, {
+                            headers: {
+                                'X-Session-ID': this.sessionId
+                            }
+                        });
+
+                        if (response.status === 401) {
+                            return; // Session expired, handled elsewhere
+                        }
+
+                        if (response.ok) {
+                            const data = await response.json();
+                            this.updateDeviceStatus(deviceId, data);
+                            console.log(`Auto-synced device ${deviceId}: ${data.arm_mode}`);
+                        }
+                    } catch (e) {
+                        console.error(`Error auto-syncing device ${deviceId}:`, e);
+                    }
+                },
+
+                // Load partition status for a device
+                async loadPartitionStatus(deviceId) {
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/devices/${deviceId}/partitions/status`, {
+                            headers: { 'X-Session-ID': this.sessionId }
+                        });
+
+                        if (response.status === 401) {
+                            return; // Session expired, already handled
+                        }
+
+                        if (!response.ok) {
+                            console.error(`Failed to get partition status for device ${deviceId}`);
+                            return;
+                        }
+
+                        const data = await response.json();
+
+                        // Update device partitions with status
+                        const deviceIndex = this.devices.findIndex(d => d.id === deviceId);
+                        if (deviceIndex !== -1 && data.partitions) {
+                            for (const statusInfo of data.partitions) {
+                                const partitionIndex = this.devices[deviceIndex].partitions.findIndex(
+                                    p => p.id === statusInfo.partition_id
+                                );
+                                if (partitionIndex !== -1) {
+                                    this.devices[deviceIndex].partitions[partitionIndex].status = statusInfo.status;
+                                    this.devices[deviceIndex].partitions[partitionIndex].is_in_alarm = statusInfo.is_in_alarm;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.error(`Error loading partition status for device ${deviceId}:`, e);
+                    }
+                },
+
+                // Handle expired/invalid session
+                handleSessionExpired() {
+                    this.sessionId = null;
+                    this.devices = [];
+                    this.events = [];
+                    localStorage.removeItem('session_id');
+                    this.showMessage('Sessao expirada. Faca login novamente.', 'error');
+                },
+
+                // Load events
+                async loadEvents() {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/events?limit=20`, {
+                            headers: { 'X-Session-ID': this.sessionId }
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Failed to load events');
+                        }
+
+                        this.events = data.events || [];
+                        this.showMessage(`${this.events.length} evento(s) carregado(s)`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Toggle event stream connection
+                toggleEventStream() {
+                    if (this.eventStreamConnected) {
+                        this.disconnectEventStream();
+                    } else {
+                        this.connectEventStream();
+                    }
+                },
+
+                // Connect to SSE event stream
+                connectEventStream() {
+                    if (this.eventSource) {
+                        this.eventSource.close();
+                    }
+
+                    // EventSource doesn't support custom headers, so we use query param
+                    const streamUrl = `${this.apiUrl}/api/v1/events/stream?session_id=${encodeURIComponent(this.sessionId)}`;
+
+                    this.eventSource = new EventSource(streamUrl);
+
+                    this.eventSource.addEventListener('connected', (e) => {
+                        const data = JSON.parse(e.data);
+                        console.log('SSE connected:', data);
+                        this.eventStreamConnected = true;
+                        this.showMessage('Conectado ao stream de eventos em tempo real!', 'success');
+                    });
+
+                    this.eventSource.addEventListener('alarm_event', (e) => {
+                        const event = JSON.parse(e.data);
+                        console.log('New alarm event:', event);
+
+                        // Mark as new for animation
+                        event.is_new = true;
+
+                        // Add to beginning of events list
+                        this.events.unshift(event);
+
+                        // Limit events list size
+                        if (this.events.length > 50) {
+                            this.events = this.events.slice(0, 50);
+                        }
+
+                        // Show notification for alarms
+                        if (event.is_alarm) {
+                            this.showMessage(`DISPARO: ${event.event_name} - ${event.zone?.name || 'Zona desconhecida'}`, 'error');
+
+                            // Browser notification if permitted
+                            if (Notification.permission === 'granted') {
+                                new Notification('DISPARO DE ALARME!', {
+                                    body: `${event.event_name}\n${event.zone?.name || ''}`,
+                                    icon: '/favicon.ico',
+                                    tag: 'alarm-' + event.id
+                                });
+                            }
+                        } else {
+                            this.showMessage(`Novo evento: ${event.event_name}`, 'info');
+                        }
+
+                        // Remove new flag after animation
+                        setTimeout(() => {
+                            const idx = this.events.findIndex(ev => ev.id === event.id);
+                            if (idx !== -1) {
+                                this.events[idx].is_new = false;
+                            }
+                        }, 2000);
+                    });
+
+                    this.eventSource.addEventListener('ping', (e) => {
+                        console.log('SSE keepalive ping');
+                    });
+
+                    this.eventSource.onerror = (e) => {
+                        console.error('SSE error:', e);
+                        if (this.eventSource.readyState === EventSource.CLOSED) {
+                            this.eventStreamConnected = false;
+                            this.showMessage('Conexao com stream perdida. Reconectando...', 'error');
+
+                            // Auto-reconnect after 3 seconds
+                            setTimeout(() => {
+                                if (!this.eventStreamConnected && this.sessionId) {
+                                    this.connectEventStream();
+                                }
+                            }, 3000);
+                        }
+                    };
+                },
+
+                // Disconnect from event stream
+                disconnectEventStream() {
+                    if (this.eventSource) {
+                        this.eventSource.close();
+                        this.eventSource = null;
+                    }
+                    this.eventStreamConnected = false;
+                    this.showMessage('Desconectado do stream de eventos', 'info');
+                },
+
+                // Request browser notification permission
+                async requestNotificationPermission() {
+                    if ('Notification' in window && Notification.permission === 'default') {
+                        await Notification.requestPermission();
+                    }
+                },
+
+                // Show password modal for alarm operations
+                requestPassword(title, message, action) {
+                    this.passwordModalTitle = title;
+                    this.passwordModalMessage = message;
+                    this.pendingAction = action;
+                    this.alarmPassword = '';
+                    this.showPasswordModal = true;
+                },
+
+                // Cancel password modal
+                cancelPasswordModal() {
+                    this.showPasswordModal = false;
+                    this.alarmPassword = '';
+                    this.savePasswordChecked = false;
+                    this.pendingAction = null;
+                },
+
+                // Confirm password modal and execute pending action
+                async confirmPasswordModal() {
+                    if (!this.alarmPassword || this.alarmPassword.length < 4) return;
+
+                    this.showPasswordModal = false;
+                    const action = this.pendingAction;
+                    const password = this.alarmPassword;
+                    const savePassword = this.savePasswordChecked;
+                    this.pendingAction = null;
+                    this.alarmPassword = '';
+                    this.savePasswordChecked = false;
+
+                    if (!action) return;
+
+                    switch (action.type) {
+                        case 'arm':
+                            await this.executeArm(action.deviceId, action.partitionId, action.mode, password, savePassword);
+                            break;
+                        case 'disarm':
+                            await this.executeDisarm(action.deviceId, action.partitionId, password, savePassword);
+                            break;
+                        case 'eletrificador_on':
+                            await this.executeEletrificador(action.deviceId, 'on', password, savePassword);
+                            break;
+                        case 'eletrificador_off':
+                            await this.executeEletrificador(action.deviceId, 'off', password, savePassword);
+                            break;
+                        case 'eletrificador_alarm_activate':
+                            await this.executeEletrificadorAlarm(action.deviceId, 'activate', password, savePassword);
+                            break;
+                        case 'eletrificador_alarm_deactivate':
+                            await this.executeEletrificadorAlarm(action.deviceId, 'deactivate', password, savePassword);
+                            break;
+                        case 'get_status':
+                            await this.executeGetStatus(action.deviceId, password, savePassword);
+                            break;
+                    }
+                },
+
+                // Arm partition - use saved password or show modal
+                async armPartition(deviceId, partitionId, mode) {
+                    const device = this.devices.find(d => d.id === deviceId);
+                    if (device && device.has_saved_password) {
+                        // Use saved password directly
+                        await this.executeArmWithSavedPassword(deviceId, partitionId, mode);
+                    } else {
+                        // Show password modal
+                        const modeText = mode === 'away' ? 'TOTAL' : 'PARCIAL';
+                        this.requestPassword(
+                            `Armar Alarme (${modeText})`,
+                            `Digite a senha do painel para armar em modo ${modeText}. ATENCAO: Isso vai ARMAR o alarme!`,
+                            { type: 'arm', deviceId, partitionId, mode }
+                        );
+                    }
+                },
+
+                // Execute arm with saved password (no password in request body)
+                async executeArmWithSavedPassword(deviceId, partitionId, mode) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/arm`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ partition_id: partitionId, mode: mode })
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            // Check if this is an open zones error - show modal instead of error message
+                            if (this.handleArmError(response, data)) {
+                                return;
+                            }
+                            // For other errors, extract message properly
+                            const errorMsg = typeof data.detail === 'string' ? data.detail :
+                                             (data.detail?.message || 'Failed to arm');
+                            throw new Error(errorMsg);
+                        }
+
+                        this.showMessage(data.message || 'Alarme armado!', 'success');
+                        await this.loadDevices();
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Execute arm operation
+                async executeArm(deviceId, partitionId, mode, password, savePassword = false) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/arm`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ partition_id: partitionId, mode: mode, password: password, save_password: savePassword })
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            // Check if this is an open zones error - show modal instead of error message
+                            if (this.handleArmError(response, data)) {
+                                return;
+                            }
+                            // For other errors, extract message properly
+                            const errorMsg = typeof data.detail === 'string' ? data.detail :
+                                             (data.detail?.message || 'Failed to arm');
+                            throw new Error(errorMsg);
+                        }
+
+                        this.showMessage(data.message || 'Alarme armado!', 'success');
+                        await this.loadDevices();
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Disarm partition - use saved password or show modal
+                async disarmPartition(deviceId, partitionId) {
+                    const device = this.devices.find(d => d.id === deviceId);
+                    if (device && device.has_saved_password) {
+                        // Use saved password directly
+                        await this.executeDisarmWithSavedPassword(deviceId, partitionId);
+                    } else {
+                        // Show password modal
+                        this.requestPassword(
+                            'Desarmar Alarme',
+                            'Digite a senha do painel para desarmar. ATENCAO: Isso vai DESARMAR o alarme!',
+                            { type: 'disarm', deviceId, partitionId }
+                        );
+                    }
+                },
+
+                // Execute disarm with saved password (no password in request body)
+                async executeDisarmWithSavedPassword(deviceId, partitionId) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/disarm`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ partition_id: partitionId })
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Failed to disarm');
+                        }
+
+                        this.showMessage(data.message || 'Alarme desarmado!', 'success');
+                        await this.loadDevices();
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Execute disarm operation
+                async executeDisarm(deviceId, partitionId, password, savePassword = false) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/disarm`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ partition_id: partitionId, password: password, save_password: savePassword })
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Failed to disarm');
+                        }
+
+                        this.showMessage(data.message || 'Alarme desarmado!', 'success');
+                        await this.loadDevices();
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Check if device is an electric fence (eletrificador)
+                isEletrificador(device) {
+                    if (!device || !device.model) return false;
+                    const model = device.model.toUpperCase();
+                    return model.includes('ELC') || model.includes('ELETRIFICADOR');
+                },
+
+                // Get CSS class for partition status
+                getPartitionStatusClass(status) {
+                    if (!status) return '';
+                    const s = String(status).toUpperCase();
+                    if (s === 'ACTIVATED' || s === 'ARMED' || s === 'ARMED_AWAY' || s === 'AWAY') return 'armed';
+                    if (s === 'DEACTIVATED' || s === 'DISARMED' || s === 'OFF') return 'disarmed';
+                    if (s === 'PARTIAL' || s === 'STAY' || s === 'ARMED_STAY' || s === 'ARMED_HOME' || s === 'HOME') return 'stay';
+                    if (s === 'TRIGGERED' || s === 'ALARM' || s === 'IN_ALARM') return 'armed'; // Use red for alarm
+                    return '';
+                },
+
+                // Get human-readable status text
+                getPartitionStatusText(status) {
+                    if (!status) return 'Consultando...';
+                    const s = String(status).toUpperCase();
+                    if (s === 'ACTIVATED' || s === 'ARMED' || s === 'ARMED_AWAY' || s === 'AWAY') return 'ARMADO TOTAL';
+                    if (s === 'DEACTIVATED' || s === 'DISARMED' || s === 'OFF') return 'DESARMADO';
+                    if (s === 'PARTIAL' || s === 'STAY' || s === 'ARMED_STAY' || s === 'ARMED_HOME' || s === 'HOME') return 'ARMADO PARCIAL';
+                    if (s === 'TRIGGERED' || s === 'ALARM' || s === 'IN_ALARM') return 'EM ALARME!';
+                    if (s === 'NOT_AUTHORIZED') return 'SEM PERMISSAO';
+                    if (s === 'PENDING' || s === 'ARMING') return 'ARMANDO...';
+                    if (s === 'ENTRY_DELAY') return 'TEMPO ENTRADA';
+                    if (s === 'EXIT_DELAY') return 'TEMPO SAIDA';
+                    return status;
+                },
+
+                // Get eletrificador status from device
+                getEletrificadorStatus(device) {
+                    if (!device) return null;
+                    // Check various possible status fields (status is set by updateDeviceStatus)
+                    return device.status || device.state ||
+                           (device.partitions && device.partitions[0]?.status) || 'DESCONHECIDO';
+                },
+
+                // Get CSS class for eletrificador status
+                getEletrificadorStatusClass(device) {
+                    const status = this.getEletrificadorStatus(device);
+                    if (!status) return '';
+                    const s = status.toUpperCase();
+                    if (s === 'ACTIVATED' || s === 'ON' || s === 'ARMED') return 'armed';
+                    if (s === 'DEACTIVATED' || s === 'OFF' || s === 'DISARMED') return 'disarmed';
+                    return '';
+                },
+
+                // Get human-readable eletrificador status text
+                getEletrificadorStatusText(device) {
+                    const status = this.getEletrificadorStatus(device);
+                    if (!status) return 'DESCONHECIDO';
+                    const s = status.toUpperCase();
+                    if (s === 'ACTIVATED' || s === 'ON' || s === 'ARMED' || s === 'ARMED_AWAY') return 'LIGADO';
+                    if (s === 'DEACTIVATED' || s === 'OFF' || s === 'DISARMED') return 'DESLIGADO';
+                    if (s === 'NOT_AUTHORIZED') return 'SEM PERMISSAO';
+                    if (s === 'DESCONHECIDO') return 'SINCRONIZAR...';
+                    return status;
+                },
+
+                // Get CSS class for eletrificador SHOCK status
+                getEletrificadorShockClass(device) {
+                    if (!device) return '';
+                    // Use shock_enabled field from API response
+                    if (device.shock_enabled === true) return 'armed';  // Red = shock on
+                    if (device.shock_enabled === false) return 'disarmed';  // Green = shock off
+                    // Fallback to old status if shock_enabled not available
+                    return this.getEletrificadorStatusClass(device);
+                },
+
+                // Get human-readable eletrificador SHOCK status text
+                getEletrificadorShockText(device) {
+                    if (!device) return 'SINCRONIZAR...';
+                    // Use shock_enabled field from API response
+                    if (device.shock_enabled === true) return 'LIGADO';
+                    if (device.shock_enabled === false) return 'DESLIGADO';
+                    // Fallback to old status if shock_enabled not available
+                    return this.getEletrificadorStatusText(device);
+                },
+
+                // Get CSS class for eletrificador ALARM status
+                getEletrificadorAlarmClass(device) {
+                    if (!device) return '';
+                    // Use alarm_enabled field from API response
+                    if (device.alarm_enabled === true) return 'armed';  // Red = alarm armed
+                    if (device.alarm_enabled === false) return 'disarmed';  // Green = alarm disarmed
+                    return '';
+                },
+
+                // Get human-readable eletrificador ALARM status text
+                getEletrificadorAlarmText(device) {
+                    if (!device) return 'SINCRONIZAR...';
+                    // Use alarm_enabled field from API response
+                    if (device.alarm_enabled === true) return 'ARMADO';
+                    if (device.alarm_enabled === false) return 'DESARMADO';
+                    return 'SINCRONIZAR...';
+                },
+
+                // Control electric fence SHOCK - use saved password or show modal
+                async controlEletrificador(deviceId, action) {
+                    const device = this.devices.find(d => d.id === deviceId);
+                    if (device && device.has_saved_password) {
+                        // Use saved password directly
+                        await this.executeEletrificadorWithSavedPassword(deviceId, action);
+                    } else {
+                        // Show password modal
+                        const actionText = action === 'on' ? 'LIGAR' : 'DESLIGAR';
+                        this.requestPassword(
+                            `${actionText} Choque`,
+                            `Digite a senha do painel para ${actionText.toLowerCase()} o choque da cerca. ATENCAO!`,
+                            { type: action === 'on' ? 'eletrificador_on' : 'eletrificador_off', deviceId }
+                        );
+                    }
+                },
+
+                // Control electric fence ALARM - use saved password or show modal
+                async controlEletrificadorAlarm(deviceId, action) {
+                    const device = this.devices.find(d => d.id === deviceId);
+                    if (device && device.has_saved_password) {
+                        // Use saved password directly
+                        await this.executeEletrificadorAlarmWithSavedPassword(deviceId, action);
+                    } else {
+                        // Show password modal
+                        const actionText = action === 'activate' ? 'ARMAR' : 'DESARMAR';
+                        this.requestPassword(
+                            `${actionText} Alarme`,
+                            `Digite a senha do painel para ${actionText.toLowerCase()} o alarme do eletrificador.`,
+                            { type: action === 'activate' ? 'eletrificador_alarm_activate' : 'eletrificador_alarm_deactivate', deviceId }
+                        );
+                    }
+                },
+
+                // Execute eletrificador ALARM control with saved password
+                async executeEletrificadorAlarmWithSavedPassword(deviceId, action) {
+                    const actionText = action === 'activate' ? 'ARMAR' : 'DESARMAR';
+                    this.loading = true;
+                    try {
+                        const endpoint = action === 'activate' ? 'activate' : 'deactivate';
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/eletrificador/${endpoint}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({})
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || `Falha ao ${actionText.toLowerCase()} alarme`);
+                        }
+
+                        // Optimistic update - update UI immediately without full refresh
+                        this.updateEletrificadorAlarmState(deviceId, action === 'activate');
+                        this.showMessage(data.message || `Alarme ${action === 'activate' ? 'ARMADO' : 'DESARMADO'}!`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Execute eletrificador ALARM control with password
+                async executeEletrificadorAlarm(deviceId, action, password, savePassword = false) {
+                    const actionText = action === 'activate' ? 'ARMAR' : 'DESARMAR';
+                    this.loading = true;
+                    try {
+                        const endpoint = action === 'activate' ? 'activate' : 'deactivate';
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/eletrificador/${endpoint}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ password: password })
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || `Falha ao ${actionText.toLowerCase()} alarme`);
+                        }
+
+                        // Optimistic update - update UI immediately
+                        this.updateEletrificadorAlarmState(deviceId, action === 'activate');
+
+                        // Save password if requested (background, no await)
+                        if (savePassword) {
+                            this.saveDevicePassword(deviceId, password);
+                            // Update has_saved_password flag locally
+                            const device = this.devices.find(d => d.id === deviceId);
+                            if (device) device.has_saved_password = true;
+                        }
+
+                        this.showMessage(data.message || `Alarme ${action === 'activate' ? 'ARMADO' : 'DESARMADO'}!`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Execute eletrificador SHOCK control with saved password (no password in request body)
+                async executeEletrificadorWithSavedPassword(deviceId, action) {
+                    const actionText = action === 'on' ? 'LIGAR' : 'DESLIGAR';
+                    this.loading = true;
+                    try {
+                        // Use shock/on and shock/off endpoints for SHOCK control
+                        const endpoint = action === 'on' ? 'shock/on' : 'shock/off';
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/eletrificador/${endpoint}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({})
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || `Falha ao ${actionText.toLowerCase()} choque`);
+                        }
+
+                        // Optimistic update - update UI immediately without full refresh
+                        this.updateEletrificadorShockState(deviceId, action === 'on');
+                        this.showMessage(data.message || `Choque ${action === 'on' ? 'LIGADO' : 'DESLIGADO'}!`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Execute eletrificador SHOCK control operation
+                async executeEletrificador(deviceId, action, password, savePassword = false) {
+                    const actionText = action === 'on' ? 'LIGAR' : 'DESLIGAR';
+                    this.loading = true;
+                    try {
+                        // Use shock/on and shock/off endpoints for SHOCK control
+                        const endpoint = action === 'on' ? 'shock/on' : 'shock/off';
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/eletrificador/${endpoint}`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ password: password })
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || `Falha ao ${actionText.toLowerCase()} choque`);
+                        }
+
+                        // Optimistic update - update UI immediately
+                        this.updateEletrificadorShockState(deviceId, action === 'on');
+
+                        // Save password if requested (background, no await)
+                        if (savePassword) {
+                            this.saveDevicePassword(deviceId, password);
+                            // Update has_saved_password flag locally
+                            const device = this.devices.find(d => d.id === deviceId);
+                            if (device) device.has_saved_password = true;
+                        }
+
+                        this.showMessage(data.message || `Choque ${action === 'on' ? 'LIGADO' : 'DESLIGADO'}!`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Get real-time status via ISECNet (requires password)
+                async executeGetStatus(deviceId, password, savePassword = false) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/status`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ password: password, save_password: savePassword })
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Falha ao obter status');
+                        }
+
+                        // Update device with real-time status
+                        this.updateDeviceStatus(deviceId, data);
+
+                        // Reload devices to update has_saved_password flag
+                        if (savePassword) {
+                            await this.loadDevices();
+                        }
+
+                        this.showMessage(`Status: ${data.arm_mode.toUpperCase()} - Modelo: ${data.model || 'N/A'}`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Update device status in local state
+                updateDeviceStatus(deviceId, data) {
+                    const deviceIndex = this.devices.findIndex(d => d.id === deviceId);
+                    if (deviceIndex !== -1) {
+                        const device = this.devices[deviceIndex];
+
+                        // Update partitions with ISECNet status
+                        if (data.partitions && data.partitions.length > 0) {
+                            for (const p of data.partitions) {
+                                const partIdx = device.partitions.findIndex(
+                                    part => part.id === p.index + 1 || device.partitions.indexOf(part) === p.index
+                                );
+                                if (partIdx !== -1) {
+                                    device.partitions[partIdx].status = p.state;
+                                }
+                            }
+                        }
+
+                        // For eletrificadores, store separate shock and alarm states
+                        if (this.isEletrificador(device) || data.is_eletrificador) {
+                            // Store eletrificador-specific fields from API response
+                            device.is_eletrificador = true;
+                            device.shock_enabled = data.shock_enabled;
+                            device.shock_triggered = data.shock_triggered;
+                            device.alarm_enabled = data.alarm_enabled;
+                            device.alarm_triggered = data.alarm_triggered;
+
+                            // Set overall status for backward compatibility
+                            if (data.shock_enabled) {
+                                device.status = 'ACTIVATED';  // Shock is ON
+                            } else {
+                                device.status = 'DEACTIVATED';  // Shock is OFF
+                            }
+
+                            console.log(`Eletrificador ${deviceId} status: shock=${data.shock_enabled}, alarm=${data.alarm_enabled}`);
+                        }
+                    }
+                },
+
+                // Optimistic update for eletrificador shock state (immediate UI feedback)
+                updateEletrificadorShockState(deviceId, enabled) {
+                    const deviceIndex = this.devices.findIndex(d => d.id === deviceId);
+                    if (deviceIndex !== -1) {
+                        this.devices[deviceIndex].shock_enabled = enabled;
+                        this.devices[deviceIndex].status = enabled ? 'ACTIVATED' : 'DEACTIVATED';
+                        console.log(`Optimistic update: device ${deviceId} shock_enabled=${enabled}`);
+                    }
+                },
+
+                // Optimistic update for eletrificador alarm state (immediate UI feedback)
+                updateEletrificadorAlarmState(deviceId, enabled) {
+                    const deviceIndex = this.devices.findIndex(d => d.id === deviceId);
+                    if (deviceIndex !== -1) {
+                        this.devices[deviceIndex].alarm_enabled = enabled;
+                        console.log(`Optimistic update: device ${deviceId} alarm_enabled=${enabled}`);
+                    }
+                },
+
+                // Auto-sync status using saved password
+                async autoSyncStatus(deviceId) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/status/auto`, {
+                            headers: {
+                                'X-Session-ID': this.sessionId
+                            }
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Falha ao sincronizar status');
+                        }
+
+                        // Update device with real-time status
+                        this.updateDeviceStatus(deviceId, data);
+
+                        // Show appropriate message based on device type
+                        if (data.is_eletrificador) {
+                            const shockStatus = data.shock_enabled ? 'LIGADO' : 'DESLIGADO';
+                            const alarmStatus = data.alarm_enabled ? 'ARMADO' : 'DESARMADO';
+                            this.showMessage(`Eletrificador: Choque ${shockStatus}, Alarme ${alarmStatus} - Modelo: ${data.model || 'N/A'}`, 'success');
+                        } else {
+                            this.showMessage(`Sincronizado: ${data.arm_mode.toUpperCase()} - Modelo: ${data.model || 'N/A'}`, 'success');
+                        }
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Save device password
+                async saveDevicePassword(deviceId, password) {
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/devices/${deviceId}/password`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Session-ID': this.sessionId
+                            },
+                            body: JSON.stringify({ password: password })
+                        });
+
+                        if (response.ok) {
+                            console.log(`Password saved for device ${deviceId}`);
+                        }
+                    } catch (e) {
+                        console.error(`Error saving password for device ${deviceId}:`, e);
+                    }
+                },
+
+                // Forget device password
+                async forgetDevicePassword(deviceId) {
+                    if (!confirm('Tem certeza que deseja esquecer a senha salva para este dispositivo?')) {
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/devices/${deviceId}/password`, {
+                            method: 'DELETE',
+                            headers: {
+                                'X-Session-ID': this.sessionId
+                            }
+                        });
+
+                        if (response.ok) {
+                            this.showMessage('Senha esquecida com sucesso', 'success');
+                            await this.loadDevices();
+                        } else {
+                            const data = await response.json();
+                            throw new Error(data.detail || 'Falha ao esquecer senha');
+                        }
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    }
+                },
+
+                // Helpers
+                showMessage(text, type) {
+                    this.message = text;
+                    this.messageType = type;
+                    setTimeout(() => { this.message = null; }, 5000);
+                },
+
+                formatDate(dateStr) {
+                    if (!dateStr) return 'N/A';
+                    try {
+                        return new Date(dateStr).toLocaleString('pt-BR');
+                    } catch (e) {
+                        return dateStr;
+                    }
+                },
+
+                // Get zone count based on alarm model
+                getZoneCountForModel(model) {
+                    if (!model) return 48;
+                    const m = model.toUpperCase();
+                    if (m.includes('8000')) return 64;
+                    if (m.includes('4010')) return 64;
+                    if (m.includes('2018') || m.includes('2118')) return 48;
+                    if (m.includes('1016')) return 16;
+                    if (m.includes('1000_SMART')) return 10;
+                    if (m.includes('ANM_24')) return 24;
+                    if (m.includes('ELC') || m.includes('6012')) return 8;
+                    return 48;
+                },
+
+                // Open zone editor modal
+                async openZoneEditor(deviceId) {
+                    this.loading = true;
+                    this.editingDeviceId = deviceId;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/zones/${deviceId}`, {
+                            headers: { 'X-Session-ID': this.sessionId }
+                        });
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Falha ao carregar zonas');
+                        }
+
+                        this.editingZones = data.zones || [];
+                        this.showZoneEditorModal = true;
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Save zone friendly names
+                async saveZoneFriendlyNames() {
+                    this.loading = true;
+                    let savedCount = 0;
+                    try {
+                        for (const zone of this.editingZones) {
+                            // Only save zones that have a friendly name set
+                            if (zone.friendly_name && zone.friendly_name.trim()) {
+                                const response = await fetch(`${this.apiUrl}/api/v1/zones/${this.editingDeviceId}/${zone.index}/friendly_name`, {
+                                    method: 'PUT',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-Session-ID': this.sessionId
+                                    },
+                                    body: JSON.stringify({ friendly_name: zone.friendly_name.trim() })
+                                });
+
+                                if (response.ok) {
+                                    savedCount++;
+                                }
+                            }
+                        }
+
+                        this.showZoneEditorModal = false;
+                        this.showMessage(`${savedCount} nome(s) de zona(s) salvo(s) com sucesso!`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                // Show open zones error modal
+                showOpenZonesError(zones) {
+                    this.openZones = zones;
+                    this.showOpenZonesModal = true;
+                },
+
+                // Handle arm error response (check for open zones)
+                handleArmError(response, data) {
+                    // Check if this is an open zones error
+                    if (data.detail && typeof data.detail === 'object' && data.detail.error === 'OpenZonesError') {
+                        this.showOpenZonesError(data.detail.open_zones || []);
+                        return true;
+                    }
+                    return false;
+                }
+            };
+        }
+    </script>
+</body>
+</html>

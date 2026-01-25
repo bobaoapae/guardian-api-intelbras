@@ -99,13 +99,13 @@ node_modules/
 .Trashes
 ehthumbs.db
 
-# Project specific sensitive files
-RESUMO_PROJETO.md
-TESTE_E_VALIDACAO.md
-FASE1_VALIDATION.md
-IMPLEMENTATION_STATUS.md
-INSTALACAO.md
-CHANGELOG.md
+# Project specific sensitive files (root level only)
+/RESUMO_PROJETO.md
+/TESTE_E_VALIDACAO.md
+/FASE1_VALIDATION.md
+/IMPLEMENTATION_STATUS.md
+/INSTALACAO.md
+/CHANGELOG.md
 
 # Local startup scripts
 START.bat

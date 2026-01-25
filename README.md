@@ -2,6 +2,34 @@
 
 Complete integration for controlling Intelbras Guardian alarm systems via Home Assistant.
 
+[![Add Add-on Repository](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbobaoapae%2Fguardian-api-intelbras)
+
+## Installation Options
+
+### Option 1: Home Assistant Add-on (Recommended for Supervisor users)
+
+If you're running Home Assistant OS or Supervised, you can install the API as an add-on:
+
+1. Click the button above or manually add the repository:
+   - **Settings** → **Add-ons** → **Add-on Store** → **⋮** (top right) → **Repositories**
+   - Add: `https://github.com/bobaoapae/guardian-api-intelbras`
+
+2. Find "**Intelbras Guardian API**" in the add-on store and click **Install**
+
+3. Start the add-on and access the Web UI at `http://[YOUR_HA_IP]:8000`
+
+4. Install the Home Assistant integration (see below)
+
+### Option 2: Docker Compose (Standalone)
+
+For Docker or Home Assistant Container users, see [Docker Deployment](#1-deploy-fastapi-middleware) below.
+
+### Option 3: Manual Python
+
+For development or custom setups, see [Development](#development) section.
+
+---
+
 ## Architecture
 
 This project implements a 3-layer architecture:

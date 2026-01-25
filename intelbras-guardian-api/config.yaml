@@ -1,0 +1,26 @@
+name: "Intelbras Guardian API"
+description: "API middleware for Intelbras Guardian alarm systems integration with Home Assistant"
+version: "1.0.0"
+slug: "intelbras-guardian-api"
+url: "https://github.com/bobaoapae/guardian-api-intelbras"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+startup: application
+boot: auto
+init: false
+homeassistant_api: false
+host_network: false
+ports:
+  8000/tcp: 8000
+ports_description:
+  8000/tcp: "FastAPI Web UI and REST API"
+map:
+  - config:rw
+options:
+  log_level: "info"
+schema:
+  log_level: list(trace|debug|info|warning|error|critical)
