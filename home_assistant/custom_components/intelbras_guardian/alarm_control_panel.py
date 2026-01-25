@@ -45,8 +45,6 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
     """Representation of an Intelbras Guardian alarm partition."""
 
     _attr_has_entity_name = True
-    _attr_code_arm_required = False
-    _attr_code_format = None
     _attr_supported_features = (
         AlarmControlPanelEntityFeature.ARM_HOME |
         AlarmControlPanelEntityFeature.ARM_AWAY

@@ -386,6 +386,41 @@ EVENT_POLL_INTERVAL=30
 - Salve a senha do dispositivo para status em tempo real via ISECNet
 - Verifique se as zonas estão configuradas corretamente na central de alarme
 
+### Alarme não aparece nos Controles de Dispositivos Android
+Isso é uma **limitação da plataforma Android**, não da integração. O Android Device Controls suporta apenas domínios específicos do Home Assistant:
+- `camera`, `climate`, `cover`, `fan`, `humidifier`, `light`, `lock`, `media_player`, `remote`, `scene`, `script`, `switch`, `vacuum`, `water_heater`
+
+O domínio `alarm_control_panel` **não é suportado** pelo Android Device Controls.
+
+**Solução alternativa**: Use scripts do Home Assistant para controlar o alarme:
+
+```yaml
+# configuration.yaml ou scripts.yaml
+script:
+  armar_alarme:
+    alias: "Armar Alarme"
+    sequence:
+      - service: alarm_control_panel.alarm_arm_away
+        target:
+          entity_id: alarm_control_panel.intelbras_guardian_particao_1
+
+  desarmar_alarme:
+    alias: "Desarmar Alarme"
+    sequence:
+      - service: alarm_control_panel.alarm_disarm
+        target:
+          entity_id: alarm_control_panel.intelbras_guardian_particao_1
+
+  armar_alarme_em_casa:
+    alias: "Armar Alarme (Em Casa)"
+    sequence:
+      - service: alarm_control_panel.alarm_arm_home
+        target:
+          entity_id: alarm_control_panel.intelbras_guardian_particao_1
+```
+
+Os scripts criados aparecerão nos Controles de Dispositivos Android e permitirão controlar o alarme.
+
 ## Desenvolvimento
 
 ### Executar FastAPI localmente
