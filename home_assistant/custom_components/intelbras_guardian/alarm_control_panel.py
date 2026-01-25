@@ -168,10 +168,19 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             self._device_id,
             self._partition_id
         )
-        if result.get("success"):
-            await self.coordinator.async_request_refresh()
-        else:
+
+        # Always refresh to get current state
+        await self.coordinator.async_request_refresh()
+
+        if not result.get("success"):
             error_msg = result.get("error", "Falha ao desarmar")
+            # Check if "No response" - command may have worked anyway
+            if "No response" in error_msg:
+                _LOGGER.warning(f"Disarm command sent but no response received - checking state")
+                # If state is now disarmed, command worked
+                if self.state == AlarmControlPanelState.DISARMED:
+                    _LOGGER.info("Disarm successful despite no response")
+                    return
             _LOGGER.error(f"Failed to disarm partition: {error_msg}")
             raise HomeAssistantError(f"Falha ao desarmar: {error_msg}")
 
@@ -183,10 +192,18 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             self._partition_id,
             mode="home"
         )
-        if result.get("success"):
-            await self.coordinator.async_request_refresh()
-        else:
+
+        # Always refresh to get current state
+        await self.coordinator.async_request_refresh()
+
+        if not result.get("success"):
             error_msg = self._format_arm_error(result)
+            # Check if "No response" - command may have worked anyway
+            if "No response" in str(result.get("error", "")):
+                _LOGGER.warning(f"Arm home command sent but no response received - checking state")
+                if self.state == AlarmControlPanelState.ARMED_HOME:
+                    _LOGGER.info("Arm home successful despite no response")
+                    return
             _LOGGER.error(f"Failed to arm partition in home mode: {error_msg}")
             raise HomeAssistantError(error_msg)
 
@@ -198,10 +215,18 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             self._partition_id,
             mode="away"
         )
-        if result.get("success"):
-            await self.coordinator.async_request_refresh()
-        else:
+
+        # Always refresh to get current state
+        await self.coordinator.async_request_refresh()
+
+        if not result.get("success"):
             error_msg = self._format_arm_error(result)
+            # Check if "No response" - command may have worked anyway
+            if "No response" in str(result.get("error", "")):
+                _LOGGER.warning(f"Arm away command sent but no response received - checking state")
+                if self.state == AlarmControlPanelState.ARMED_AWAY:
+                    _LOGGER.info("Arm away successful despite no response")
+                    return
             _LOGGER.error(f"Failed to arm partition in away mode: {error_msg}")
             raise HomeAssistantError(error_msg)
 
