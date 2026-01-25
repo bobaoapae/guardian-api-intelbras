@@ -20,5 +20,45 @@
     "abort": {
       "already_configured": "Esta conta ja esta configurada."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opcoes do Intelbras Guardian",
+        "description": "Selecione uma opcao para configurar.",
+        "menu_options": {
+          "configure_device_password": "Configurar Senha do Dispositivo",
+          "manage_zones": "Gerenciar Nomes das Zonas"
+        }
+      },
+      "configure_device_password": {
+        "title": "Selecionar Dispositivo",
+        "description": "Selecione um dispositivo para configurar a senha de comunicacao via protocolo ISECNet.",
+        "data": {
+          "device": "Dispositivo"
+        }
+      },
+      "enter_password": {
+        "title": "Senha do Dispositivo",
+        "description": "Insira a senha do dispositivo: {device_name}\n\nEsta e a senha programada na central de alarme (nao a senha da sua conta Intelbras).",
+        "data": {
+          "action": "Acao",
+          "device_password": "Senha do Dispositivo"
+        }
+      },
+      "manage_zones": {
+        "title": "Gerenciar Nomes das Zonas",
+        "description": "Os nomes amigaveis das zonas podem ser configurados via Web UI do FastAPI.\n\nAcesse: {webui_url}\n\nFaca login com suas credenciais Intelbras, selecione o dispositivo e clique em 'Zonas' para gerenciar os nomes."
+      }
+    },
+    "error": {
+      "save_failed": "Falha ao salvar senha. Verifique os logs do FastAPI.",
+      "delete_failed": "Falha ao remover senha.",
+      "password_required": "A senha e obrigatoria."
+    },
+    "abort": {
+      "not_loaded": "Integracao nao carregada. Tente novamente.",
+      "no_devices": "Nenhum dispositivo encontrado."
+    }
   }
 }

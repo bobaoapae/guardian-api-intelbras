@@ -7,7 +7,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -70,6 +70,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Create the options flow."""
+        return OptionsFlowHandler(config_entry)
+
     async def async_step_user(
         self,
         user_input: Optional[Dict[str, Any]] = None
@@ -101,6 +109,150 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
+        )
+
+
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options flow for Intelbras Guardian."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+        self._devices: list = []
+        self._selected_device_id: Optional[int] = None
+
+    async def async_step_init(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Manage the options - show menu."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=["configure_device_password", "manage_zones"],
+        )
+
+    async def async_step_configure_device_password(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Handle device password configuration."""
+        errors: Dict[str, str] = {}
+
+        # Get coordinator from hass.data
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if not coordinator:
+            return self.async_abort(reason="not_loaded")
+
+        # Build device list for selection
+        if coordinator.data:
+            self._devices = []
+            for device_id, device in coordinator.data.get("devices", {}).items():
+                has_password = device.get("has_saved_password", False)
+                status = " [Senha Salva]" if has_password else ""
+                self._devices.append({
+                    "id": device_id,
+                    "name": f"{device.get('description', f'Dispositivo {device_id}')}{status}",
+                    "has_password": has_password,
+                })
+
+        if not self._devices:
+            return self.async_abort(reason="no_devices")
+
+        if user_input is not None:
+            self._selected_device_id = int(user_input["device"])
+            return await self.async_step_enter_password()
+
+        # Build device selection schema
+        device_options = {str(d["id"]): d["name"] for d in self._devices}
+
+        return self.async_show_form(
+            step_id="configure_device_password",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("device"): vol.In(device_options),
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_enter_password(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Enter or manage device password."""
+        errors: Dict[str, str] = {}
+
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if not coordinator:
+            return self.async_abort(reason="not_loaded")
+
+        # Find selected device
+        device = coordinator.get_device(self._selected_device_id)
+        device_name = device.get("description", f"Dispositivo {self._selected_device_id}") if device else f"Dispositivo {self._selected_device_id}"
+        has_password = device.get("has_saved_password", False) if device else False
+
+        if user_input is not None:
+            action = user_input.get("action", "save")
+
+            if action == "delete":
+                # Delete password
+                success = await coordinator.client.delete_device_password(self._selected_device_id)
+                if success:
+                    await coordinator.async_request_refresh()
+                    return self.async_create_entry(title="", data={})
+                else:
+                    errors["base"] = "delete_failed"
+            else:
+                # Save password
+                password = user_input.get("device_password", "")
+                if password:
+                    success = await coordinator.client.save_device_password(
+                        self._selected_device_id,
+                        password
+                    )
+                    if success:
+                        await coordinator.async_request_refresh()
+                        return self.async_create_entry(title="", data={})
+                    else:
+                        errors["base"] = "save_failed"
+                else:
+                    errors["base"] = "password_required"
+
+        # Build schema based on whether password exists
+        if has_password:
+            schema = vol.Schema(
+                {
+                    vol.Required("action", default="save"): vol.In({
+                        "save": "Atualizar Senha",
+                        "delete": "Remover Senha",
+                    }),
+                    vol.Optional("device_password"): str,
+                }
+            )
+        else:
+            schema = vol.Schema(
+                {
+                    vol.Required("device_password"): str,
+                }
+            )
+
+        return self.async_show_form(
+            step_id="enter_password",
+            data_schema=schema,
+            description_placeholders={"device_name": device_name},
+            errors=errors,
+        )
+
+    async def async_step_manage_zones(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Manage zone friendly names - redirect to Web UI."""
+        return self.async_show_form(
+            step_id="manage_zones",
+            description_placeholders={
+                "webui_url": f"http://{self.config_entry.data[CONF_FASTAPI_HOST]}:{self.config_entry.data[CONF_FASTAPI_PORT]}"
+            },
         )
 
 

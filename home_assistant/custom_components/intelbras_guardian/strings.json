@@ -20,5 +20,45 @@
     "abort": {
       "already_configured": "This account is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Intelbras Guardian Options",
+        "description": "Select an option to configure.",
+        "menu_options": {
+          "configure_device_password": "Configure Device Password",
+          "manage_zones": "Manage Zone Names"
+        }
+      },
+      "configure_device_password": {
+        "title": "Select Device",
+        "description": "Select a device to configure the password for ISECNet protocol communication.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "enter_password": {
+        "title": "Device Password",
+        "description": "Enter the password for device: {device_name}\n\nThis is the password programmed in the alarm panel (not your Intelbras account password).",
+        "data": {
+          "action": "Action",
+          "device_password": "Device Password"
+        }
+      },
+      "manage_zones": {
+        "title": "Manage Zone Names",
+        "description": "Zone friendly names can be configured via the FastAPI Web UI.\n\nAccess: {webui_url}\n\nLogin with your Intelbras credentials, select the device, and click on 'Zonas' to manage zone names."
+      }
+    },
+    "error": {
+      "save_failed": "Failed to save password. Check the FastAPI logs.",
+      "delete_failed": "Failed to delete password.",
+      "password_required": "Password is required."
+    },
+    "abort": {
+      "not_loaded": "Integration not loaded. Please try again.",
+      "no_devices": "No devices found."
+    }
   }
 }
