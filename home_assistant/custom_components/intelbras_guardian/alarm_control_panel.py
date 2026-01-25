@@ -9,6 +9,7 @@ from homeassistant.components.alarm_control_panel import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -161,37 +162,60 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
     async def async_alarm_disarm(self, code: str = None) -> None:
         """Send disarm command."""
         _LOGGER.info(f"Disarming partition {self._partition_id}")
-        success = await self.coordinator.client.disarm_partition(
+        result = await self.coordinator.client.disarm_partition(
             self._device_id,
             self._partition_id
         )
-        if success:
+        if result.get("success"):
             await self.coordinator.async_request_refresh()
         else:
-            _LOGGER.error("Failed to disarm partition")
+            error_msg = result.get("error", "Falha ao desarmar")
+            _LOGGER.error(f"Failed to disarm partition: {error_msg}")
+            raise HomeAssistantError(f"Falha ao desarmar: {error_msg}")
 
     async def async_alarm_arm_home(self, code: str = None) -> None:
         """Send arm home (stay/partial) command."""
         _LOGGER.info(f"Arming partition {self._partition_id} in home mode")
-        success = await self.coordinator.client.arm_partition(
+        result = await self.coordinator.client.arm_partition(
             self._device_id,
             self._partition_id,
             mode="home"
         )
-        if success:
+        if result.get("success"):
             await self.coordinator.async_request_refresh()
         else:
-            _LOGGER.error("Failed to arm partition in home mode")
+            error_msg = self._format_arm_error(result)
+            _LOGGER.error(f"Failed to arm partition in home mode: {error_msg}")
+            raise HomeAssistantError(error_msg)
 
     async def async_alarm_arm_away(self, code: str = None) -> None:
         """Send arm away (total) command."""
         _LOGGER.info(f"Arming partition {self._partition_id} in away mode")
-        success = await self.coordinator.client.arm_partition(
+        result = await self.coordinator.client.arm_partition(
             self._device_id,
             self._partition_id,
             mode="away"
         )
-        if success:
+        if result.get("success"):
             await self.coordinator.async_request_refresh()
         else:
-            _LOGGER.error("Failed to arm partition in away mode")
+            error_msg = self._format_arm_error(result)
+            _LOGGER.error(f"Failed to arm partition in away mode: {error_msg}")
+            raise HomeAssistantError(error_msg)
+
+    def _format_arm_error(self, result: dict) -> str:
+        """Format error message for arming failure."""
+        error = result.get("error", "Falha ao armar")
+        open_zones = result.get("open_zones", [])
+
+        if open_zones:
+            zone_names = []
+            for zone in open_zones:
+                if isinstance(zone, dict):
+                    name = zone.get("friendly_name") or zone.get("name") or f"Zona {zone.get('index', '?')}"
+                else:
+                    name = str(zone)
+                zone_names.append(name)
+            return f"Não foi possível armar: zonas abertas - {', '.join(zone_names)}"
+
+        return f"Falha ao armar: {error}"

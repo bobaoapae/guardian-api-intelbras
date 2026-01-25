@@ -232,27 +232,87 @@ class GuardianApiClient:
         device_id: int,
         partition_id: int,
         mode: str = "away"
-    ) -> bool:
-        """Arm a partition."""
-        result = await self._request(
+    ) -> Dict[str, Any]:
+        """Arm a partition.
+
+        Returns:
+            Dict with 'success' (bool) and optionally 'error' (str) or 'open_zones' (list)
+        """
+        result = await self._request_with_error(
             "POST",
             f"/api/v1/alarm/{device_id}/arm",
             {"partition_id": partition_id, "mode": mode}
         )
-        return result is not None and result.get("success", False)
+        return result
 
     async def disarm_partition(
         self,
         device_id: int,
         partition_id: int
-    ) -> bool:
-        """Disarm a partition."""
-        result = await self._request(
+    ) -> Dict[str, Any]:
+        """Disarm a partition.
+
+        Returns:
+            Dict with 'success' (bool) and optionally 'error' (str)
+        """
+        result = await self._request_with_error(
             "POST",
             f"/api/v1/alarm/{device_id}/disarm",
             {"partition_id": partition_id}
         )
-        return result is not None and result.get("success", False)
+        return result
+
+    async def _request_with_error(
+        self,
+        method: str,
+        endpoint: str,
+        data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Make an API request and return result with error details."""
+        if not self._session_id:
+            _LOGGER.error("Not authenticated")
+            return {"success": False, "error": "Não autenticado"}
+
+        headers = {"X-Session-ID": self._session_id}
+
+        try:
+            async with async_timeout.timeout(self._timeout):
+                if method == "POST":
+                    response = await self._session.post(
+                        f"{self._base_url}{endpoint}",
+                        headers=headers,
+                        json=data or {}
+                    )
+                else:
+                    return {"success": False, "error": "Método não suportado"}
+
+                response_data = await response.json()
+
+                if response.status == 200:
+                    return response_data
+                else:
+                    # Handle error response - detail can be string or dict
+                    detail = response_data.get("detail", {})
+                    if isinstance(detail, dict):
+                        error_msg = detail.get("message", detail.get("error", "Erro desconhecido"))
+                        open_zones = detail.get("open_zones", [])
+                    else:
+                        error_msg = str(detail) if detail else "Erro desconhecido"
+                        open_zones = []
+
+                    _LOGGER.error(f"API error {response.status}: {error_msg}")
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "open_zones": open_zones
+                    }
+
+        except aiohttp.ClientError as e:
+            _LOGGER.error(f"Connection error: {e}")
+            return {"success": False, "error": f"Erro de conexão: {e}"}
+        except Exception as e:
+            _LOGGER.error(f"Request error: {e}")
+            return {"success": False, "error": f"Erro: {e}"}
 
     async def get_events(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get recent events."""
