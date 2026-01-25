@@ -1,92 +1,92 @@
 # Intelbras Guardian API Add-on
 
-API middleware for integrating Intelbras Guardian alarm systems with Home Assistant.
+Middleware de API para integração de sistemas de alarme Intelbras Guardian com Home Assistant.
 
-## About
+## Sobre
 
-This add-on provides a FastAPI middleware that communicates with Intelbras Guardian alarm panels using:
-- **OAuth 2.0** authentication with Intelbras Cloud
-- **ISECNet Protocol** for direct communication with alarm panels
+Este add-on fornece um middleware FastAPI que se comunica com centrais de alarme Intelbras Guardian usando:
+- Autenticação **OAuth 2.0** com Intelbras Cloud
+- **Protocolo ISECNet** para comunicação direta com centrais de alarme
 
-## Features
+## Funcionalidades
 
-- Real-time alarm status (arm/disarm, triggered, zones)
-- Arm/Disarm partitions (away and home modes)
-- Zone monitoring with custom friendly names
-- Electric fence (eletrificador) control
-- Event history
-- Web UI for configuration and testing
+- Status do alarme em tempo real (armar/desarmar, disparado, zonas)
+- Armar/Desarmar partições (modos ausente e em casa)
+- Monitoramento de zonas com nomes amigáveis personalizados
+- Controle de eletrificador (cerca elétrica)
+- Histórico de eventos
+- Web UI para configuração e testes
 
-## Installation
+## Instalação
 
-1. Add this repository to your Home Assistant Add-on Store:
+1. Adicione este repositório à Loja de Add-ons do Home Assistant:
 
-   [![Add Repository](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbobaoapae%2Fguardian-api-intelbras)
+   [![Adicionar Repositório](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbobaoapae%2Fguardian-api-intelbras)
 
-   Or manually: **Settings** → **Add-ons** → **Add-on Store** → **⋮** → **Repositories** → Add `https://github.com/bobaoapae/guardian-api-intelbras`
+   Ou manualmente: **Configurações** → **Add-ons** → **Loja de Add-ons** → **⋮** → **Repositórios** → Adicione `https://github.com/bobaoapae/guardian-api-intelbras`
 
-2. Find "Intelbras Guardian API" in the add-on store and click **Install**
+2. Encontre "Intelbras Guardian API" na loja de add-ons e clique em **Instalar**
 
-3. Start the add-on
+3. Inicie o add-on
 
-4. Open the Web UI at `http://[YOUR_HA_IP]:8000`
+4. Abra a Web UI em `http://[SEU_IP_HA]:8000`
 
-## Configuration
+## Configuração
 
 ```yaml
 log_level: info
 ```
 
-### Option: `log_level`
+### Opção: `log_level`
 
-The log level for the add-on. Options: `trace`, `debug`, `info`, `warning`, `error`, `critical`
+Nível de log do add-on. Opções: `trace`, `debug`, `info`, `warning`, `error`, `critical`
 
-## Usage
+## Uso
 
-### 1. Access Web UI
+### 1. Acessar Web UI
 
-After starting the add-on, access `http://[YOUR_HA_IP]:8000` to:
-- Login with your Intelbras account
-- View your devices
-- Save device passwords for ISECNet communication
-- Configure zone friendly names
-- Test arm/disarm commands
+Após iniciar o add-on, acesse `http://[SEU_IP_HA]:8000` para:
+- Fazer login com sua conta Intelbras
+- Ver seus dispositivos
+- Salvar senhas dos dispositivos para comunicação ISECNet
+- Configurar nomes amigáveis das zonas
+- Testar comandos de armar/desarmar
 
-### 2. Install Home Assistant Integration
+### 2. Instalar Integração do Home Assistant
 
-The add-on only provides the API middleware. You also need the Home Assistant integration:
+O add-on fornece apenas o middleware de API. Você também precisa da integração do Home Assistant:
 
-1. Copy `home_assistant/custom_components/intelbras_guardian` to your Home Assistant `custom_components` folder
+1. Copie `home_assistant/custom_components/intelbras_guardian` para a pasta `custom_components` do seu Home Assistant
 
-2. Restart Home Assistant
+2. Reinicie o Home Assistant
 
-3. Add the integration: **Settings** → **Devices & Services** → **Add Integration** → "Intelbras Guardian"
+3. Adicione a integração: **Configurações** → **Dispositivos e Serviços** → **Adicionar Integração** → "Intelbras Guardian"
 
 4. Configure:
-   - **Email**: Your Intelbras account email
-   - **Password**: Your Intelbras account password
-   - **FastAPI Host**: `localhost` or your HA IP
-   - **FastAPI Port**: `8000`
+   - **Email**: Email da sua conta Intelbras
+   - **Senha**: Senha da sua conta Intelbras
+   - **Host FastAPI**: `localhost` ou o IP do seu HA
+   - **Porta FastAPI**: `8000`
 
-### 3. Configure Device Password
+### 3. Configurar Senha do Dispositivo
 
-For real-time status via ISECNet protocol, save your device password:
+Para status em tempo real via protocolo ISECNet, salve a senha do seu dispositivo:
 
-**Option A - Via Home Assistant:**
-- Settings → Devices & Services → Intelbras Guardian → Configure → Configure Device Password
+**Opção A - Via Home Assistant:**
+- Configurações → Dispositivos e Serviços → Intelbras Guardian → Configurar → Configurar Senha do Dispositivo
 
-**Option B - Via Web UI:**
-- Access `http://[YOUR_HA_IP]:8000` → Login → Click "Salvar Senha" on your device
+**Opção B - Via Web UI:**
+- Acesse `http://[SEU_IP_HA]:8000` → Login → Clique em "Salvar Senha" no seu dispositivo
 
-## Network
+## Rede
 
-The add-on exposes port `8000` for the API and Web UI.
+O add-on expõe a porta `8000` para a API e Web UI.
 
-## Support
+## Suporte
 
 - [GitHub Issues](https://github.com/bobaoapae/guardian-api-intelbras/issues)
-- [Documentation](https://github.com/bobaoapae/guardian-api-intelbras)
+- [Documentação](https://github.com/bobaoapae/guardian-api-intelbras)
 
-## Disclaimer
+## Aviso Legal
 
-This add-on is NOT affiliated with Intelbras. Use at your own risk.
+Este add-on NÃO é afiliado à Intelbras. Use por sua conta e risco.

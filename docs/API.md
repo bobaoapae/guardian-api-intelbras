@@ -1,20 +1,20 @@
-# FastAPI Middleware - API Documentation
+# Documentação da API FastAPI
 
-This document describes all REST endpoints exposed by the FastAPI middleware.
+Este documento descreve todos os endpoints REST expostos pelo middleware FastAPI.
 
-## Base URL
+## URL Base
 
 ```
 http://localhost:8000/api/v1
 ```
 
-## Authentication
+## Autenticação
 
-All endpoints except `/auth/login` and `/health` require authentication via session ID.
+Todos os endpoints exceto `/auth/login` e `/health` requerem autenticação via session ID.
 
-Include the session ID in the request header:
+Inclua o session ID no header da requisição:
 ```
-X-Session-ID: your-session-id
+X-Session-ID: seu-session-id
 ```
 
 ---
@@ -23,9 +23,9 @@ X-Session-ID: your-session-id
 
 ### GET /health
 
-Check if the API is running.
+Verifica se a API está rodando.
 
-**Response:**
+**Resposta:**
 ```json
 {
   "status": "healthy"
@@ -34,21 +34,21 @@ Check if the API is running.
 
 ---
 
-## Authentication Endpoints
+## Endpoints de Autenticação
 
 ### POST /auth/login
 
-Authenticate with Intelbras credentials.
+Autentica com credenciais Intelbras.
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
-  "username": "email@example.com",
-  "password": "your-password"
+  "username": "email@exemplo.com",
+  "password": "sua-senha"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "session_id": "uuid-session-id",
@@ -56,22 +56,22 @@ Authenticate with Intelbras credentials.
 }
 ```
 
-**Errors:**
-- `401`: Invalid credentials
+**Erros:**
+- `401`: Credenciais inválidas
 
 ---
 
 ### POST /auth/logout
 
-Invalidate current session.
+Invalida a sessão atual.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Response:**
+**Resposta:**
 ```json
 {
-  "message": "Logged out successfully"
+  "message": "Logout realizado com sucesso"
 }
 ```
 
@@ -79,32 +79,32 @@ Invalidate current session.
 
 ### GET /auth/session
 
-Get current session information.
+Obtém informações da sessão atual.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Response:**
+**Resposta:**
 ```json
 {
   "session_id": "uuid-session-id",
-  "username": "email@example.com",
+  "username": "email@exemplo.com",
   "expires_at": "2024-01-25T12:00:00Z"
 }
 ```
 
 ---
 
-## Device Endpoints
+## Endpoints de Dispositivos
 
 ### GET /devices
 
-List all alarm panels (centrais) associated with the account.
+Lista todas as centrais de alarme associadas à conta.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Response:**
+**Resposta:**
 ```json
 [
   {
@@ -125,7 +125,7 @@ List all alarm panels (centrais) associated with the account.
     "zones": [
       {
         "id": 1,
-        "name": "Zone 01",
+        "name": "Zona 01",
         "status": "INACTIVE"
       }
     ]
@@ -137,98 +137,98 @@ List all alarm panels (centrais) associated with the account.
 
 ### GET /devices/{device_id}
 
-Get details of a specific device.
+Obtém detalhes de um dispositivo específico.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Response:**
-Same as single device in `/devices` response.
+**Resposta:**
+Igual ao dispositivo individual na resposta de `/devices`.
 
 ---
 
-## Password Management
+## Gerenciamento de Senha
 
 ### POST /devices/{device_id}/password
 
-Save device password for auto-sync functionality.
+Salva a senha do dispositivo para funcionalidade de auto-sync.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
-  "password": "device-password"
+  "password": "senha-do-dispositivo"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
-  "message": "Password saved successfully"
+  "message": "Senha salva com sucesso"
 }
 ```
 
-**Notes:**
-- Password is stored encrypted in memory
-- Required for real-time ISECNet status
+**Notas:**
+- A senha é armazenada criptografada em memória
+- Necessária para status em tempo real via ISECNet
 
 ---
 
 ### DELETE /devices/{device_id}/password
 
-Delete saved device password.
+Exclui a senha salva do dispositivo.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
-  "message": "Password deleted successfully"
+  "message": "Senha excluída com sucesso"
 }
 ```
 
 ---
 
-## Alarm Control Endpoints
+## Endpoints de Controle de Alarme
 
 ### POST /alarm/{device_id}/arm
 
-Arm a partition.
+Arma uma partição.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
   "partition_id": 0,
   "mode": "away",
-  "password": "device-password"
+  "password": "senha-do-dispositivo"
 }
 ```
 
-**Mode Options:**
-- `away`: Arm all zones (total)
-- `home`: Arm perimeter only (stay/partial)
+**Opções de Modo:**
+- `away`: Arma todas as zonas (total)
+- `home`: Arma apenas perímetro (stay/parcial)
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
@@ -236,32 +236,32 @@ Arm a partition.
 }
 ```
 
-**Errors:**
-- `400`: Open zones prevent arming (returns list of open zones)
-- `401`: Invalid password
-- `404`: Device or partition not found
+**Erros:**
+- `400`: Zonas abertas impedem o arme (retorna lista de zonas abertas)
+- `401`: Senha inválida
+- `404`: Dispositivo ou partição não encontrado
 
 ---
 
 ### POST /alarm/{device_id}/disarm
 
-Disarm a partition.
+Desarma uma partição.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
   "partition_id": 0,
-  "password": "device-password"
+  "password": "senha-do-dispositivo"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
@@ -273,18 +273,18 @@ Disarm a partition.
 
 ### GET /alarm/{device_id}/status
 
-Get real-time alarm status via ISECNet protocol.
+Obtém status do alarme em tempo real via protocolo ISECNet.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Query Parameters:**
-- `password`: Device password (required)
+**Parâmetros de Query:**
+- `password`: Senha do dispositivo (obrigatório)
 
-**Response:**
+**Resposta:**
 ```json
 {
   "arm_mode": "disarmed",
@@ -311,49 +311,49 @@ Get real-time alarm status via ISECNet protocol.
 
 ### GET /alarm/{device_id}/status/auto
 
-Get real-time status using saved password.
+Obtém status em tempo real usando senha salva.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Response:**
-Same as `/alarm/{device_id}/status`
+**Resposta:**
+Igual a `/alarm/{device_id}/status`
 
-**Errors:**
-- `404`: No saved password for device
+**Erros:**
+- `404`: Nenhuma senha salva para o dispositivo
 
 ---
 
-## Zone Endpoints
+## Endpoints de Zonas
 
 ### GET /devices/{device_id}/zones
 
-Get all zones with their friendly names.
+Obtém todas as zonas com seus nomes amigáveis.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Response:**
+**Resposta:**
 ```json
 {
   "device_id": 12345,
   "zones": [
     {
       "index": 0,
-      "name": "Zone 01",
-      "friendly_name": "Front Door",
+      "name": "Zona 01",
+      "friendly_name": "Porta da Frente",
       "is_open": false,
       "is_bypassed": false
     },
     {
       "index": 1,
-      "name": "Zone 02",
+      "name": "Zona 02",
       "friendly_name": null,
       "is_open": true,
       "is_bypassed": false
@@ -366,28 +366,28 @@ Get all zones with their friendly names.
 
 ### PUT /devices/{device_id}/zones/{zone_index}/friendly-name
 
-Set a friendly name for a zone.
+Define um nome amigável para uma zona.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
-- `zone_index`: Zone index (0-based)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
+- `zone_index`: Índice da zona (base 0)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
-  "friendly_name": "Front Door"
+  "friendly_name": "Porta da Frente"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
   "zone_index": 0,
-  "friendly_name": "Front Door"
+  "friendly_name": "Porta da Frente"
 }
 ```
 
@@ -395,39 +395,39 @@ Set a friendly name for a zone.
 
 ### DELETE /devices/{device_id}/zones/{zone_index}/friendly-name
 
-Delete the friendly name for a zone.
+Exclui o nome amigável de uma zona.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
-- `zone_index`: Zone index (0-based)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
+- `zone_index`: Índice da zona (base 0)
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
-  "message": "Friendly name deleted"
+  "message": "Nome amigável excluído"
 }
 ```
 
 ---
 
-## Event Endpoints
+## Endpoints de Eventos
 
 ### GET /events
 
-Get alarm event history.
+Obtém histórico de eventos do alarme.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Query Parameters:**
-- `limit`: Maximum number of events (default: 50)
-- `offset`: Pagination offset (default: 0)
+**Parâmetros de Query:**
+- `limit`: Número máximo de eventos (padrão: 50)
+- `offset`: Offset de paginação (padrão: 0)
 
-**Response:**
+**Resposta:**
 ```json
 [
   {
@@ -438,13 +438,13 @@ Get alarm event history.
     "partition_id": 0,
     "zone": {
       "id": 1,
-      "name": "Zone 01",
-      "friendly_name": "Front Door"
+      "name": "Zona 01",
+      "friendly_name": "Porta da Frente"
     },
     "notification": {
       "code": 1000,
-      "title": "Alarm Triggered",
-      "message": "Zone 01 was triggered"
+      "title": "Alarme Disparado",
+      "message": "Zona 01 foi disparada"
     }
   }
 ]
@@ -452,30 +452,30 @@ Get alarm event history.
 
 ---
 
-## Eletrificador (Electric Fence) Endpoints
+## Endpoints de Eletrificador (Cerca Elétrica)
 
 ### POST /eletrificador/{device_id}/shock/on
 
-Enable electric shock.
+Habilita o choque elétrico.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
-  "password": "device-password"
+  "password": "senha-do-dispositivo"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
-  "message": "Shock enabled"
+  "message": "Choque habilitado"
 }
 ```
 
@@ -483,26 +483,26 @@ Enable electric shock.
 
 ### POST /eletrificador/{device_id}/shock/off
 
-Disable electric shock.
+Desabilita o choque elétrico.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
-  "password": "device-password"
+  "password": "senha-do-dispositivo"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
-  "message": "Shock disabled"
+  "message": "Choque desabilitado"
 }
 ```
 
@@ -510,26 +510,26 @@ Disable electric shock.
 
 ### POST /eletrificador/{device_id}/alarm/activate
 
-Arm the fence alarm.
+Arma o alarme da cerca.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
-  "password": "device-password"
+  "password": "senha-do-dispositivo"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
-  "message": "Alarm activated"
+  "message": "Alarme ativado"
 }
 ```
 
@@ -537,57 +537,57 @@ Arm the fence alarm.
 
 ### POST /eletrificador/{device_id}/alarm/deactivate
 
-Disarm the fence alarm.
+Desarma o alarme da cerca.
 
 **Headers:**
-- `X-Session-ID`: Your session ID
+- `X-Session-ID`: Seu session ID
 
-**Path Parameters:**
-- `device_id`: Device ID (integer)
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
 
-**Request Body:**
+**Body da Requisição:**
 ```json
 {
-  "password": "device-password"
+  "password": "senha-do-dispositivo"
 }
 ```
 
-**Response:**
+**Resposta:**
 ```json
 {
   "success": true,
-  "message": "Alarm deactivated"
+  "message": "Alarme desativado"
 }
 ```
 
 ---
 
-## Error Responses
+## Respostas de Erro
 
-All errors follow this format:
+Todos os erros seguem este formato:
 
 ```json
 {
-  "detail": "Error message description"
+  "detail": "Descrição da mensagem de erro"
 }
 ```
 
-### Common HTTP Status Codes
+### Códigos de Status HTTP Comuns
 
-| Code | Description |
-|------|-------------|
-| 400  | Bad Request - Invalid parameters |
-| 401  | Unauthorized - Invalid session or credentials |
-| 404  | Not Found - Resource doesn't exist |
-| 500  | Internal Server Error |
+| Código | Descrição |
+|--------|-----------|
+| 400    | Bad Request - Parâmetros inválidos |
+| 401    | Unauthorized - Sessão ou credenciais inválidas |
+| 404    | Not Found - Recurso não existe |
+| 500    | Internal Server Error |
 
-### Open Zones Error
+### Erro de Zonas Abertas
 
-When arming fails due to open zones (error 0xE4):
+Quando o arme falha devido a zonas abertas (erro 0xE4):
 
 ```json
 {
-  "detail": "Cannot arm: zones are open",
+  "detail": "Não foi possível armar: zonas abertas",
   "error_code": "open_zones",
   "open_zones": [0, 2, 5]
 }
@@ -595,9 +595,9 @@ When arming fails due to open zones (error 0xE4):
 
 ---
 
-## Interactive Documentation
+## Documentação Interativa
 
-When the FastAPI middleware is running, access:
+Quando o middleware FastAPI estiver rodando, acesse:
 
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc

@@ -1,274 +1,284 @@
-# Intelbras Guardian API + Home Assistant Integration
+# Intelbras Guardian API + Integração Home Assistant
 
-Complete integration for controlling Intelbras Guardian alarm systems via Home Assistant.
+Integração completa para controlar sistemas de alarme Intelbras Guardian via Home Assistant.
 
-[![Add Add-on Repository](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbobaoapae%2Fguardian-api-intelbras)
+[![Adicionar Repositório de Add-on](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbobaoapae%2Fguardian-api-intelbras)
 
-## Installation Options
+## Opções de Instalação
 
-### Option 1: Home Assistant Add-on (Recommended for Supervisor users)
+### Opção 1: Add-on do Home Assistant (Recomendado para usuários do Supervisor)
 
-If you're running Home Assistant OS or Supervised, you can install the API as an add-on:
+Se você usa Home Assistant OS ou Supervised, pode instalar a API como add-on:
 
-1. Click the button above or manually add the repository:
-   - **Settings** → **Add-ons** → **Add-on Store** → **⋮** (top right) → **Repositories**
-   - Add: `https://github.com/bobaoapae/guardian-api-intelbras`
+1. Clique no botão acima ou adicione o repositório manualmente:
+   - **Configurações** → **Add-ons** → **Loja de Add-ons** → **⋮** (canto superior direito) → **Repositórios**
+   - Adicione: `https://github.com/bobaoapae/guardian-api-intelbras`
 
-2. Find "**Intelbras Guardian API**" in the add-on store and click **Install**
+2. Encontre "**Intelbras Guardian API**" na loja de add-ons e clique em **Instalar**
 
-3. Start the add-on and access the Web UI at `http://[YOUR_HA_IP]:8000`
+3. Inicie o add-on e acesse a Web UI em `http://[SEU_IP_HA]:8000`
 
-4. Install the Home Assistant integration (see below)
+4. Instale a integração do Home Assistant (veja abaixo)
 
-### Option 2: Docker Compose (Standalone)
+### Opção 2: Docker Compose (Standalone)
 
-For Docker or Home Assistant Container users, see [Docker Deployment](#1-deploy-fastapi-middleware) below.
+Para usuários de Docker ou Home Assistant Container, veja [Instalação via Docker](#1-instalar-middleware-fastapi) abaixo.
 
-### Option 3: Manual Python
+### Opção 3: Python Manual
 
-For development or custom setups, see [Development](#development) section.
+Para desenvolvimento ou configurações personalizadas, veja a seção [Desenvolvimento](#desenvolvimento).
 
 ---
 
-## Architecture
+## Arquitetura
 
-This project implements a 3-layer architecture:
+Este projeto implementa uma arquitetura em 3 camadas:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                  HOME ASSISTANT (HACS Integration)              │
+│                  HOME ASSISTANT (Integração HACS)               │
 │                                                                 │
-│  - Config Flow (manual host:port)                               │
+│  - Config Flow (host:porta manual)                              │
 │  - Coordinator (polling 30s)                                    │
-│  - Entities:                                                    │
-│    - alarm_control_panel (one per partition)                    │
-│    - binary_sensor (one per zone)                               │
-│    - sensor (last event)                                        │
-│    - switch (eletrificador shock/alarm)                         │
+│  - Entidades:                                                   │
+│    - alarm_control_panel (uma por partição)                     │
+│    - binary_sensor (um por zona)                                │
+│    - sensor (último evento)                                     │
+│    - switch (choque/alarme do eletrificador)                    │
 └───────────────────────────┬─────────────────────────────────────┘
                             │ HTTP REST
 ┌───────────────────────────▼─────────────────────────────────────┐
 │                  FASTAPI MIDDLEWARE (Container)                 │
 │                                                                 │
-│  - OAuth 2.0 authentication with Intelbras Cloud                │
-│  - Automatic token refresh                                      │
-│  - ISECNet Protocol (direct communication with alarm panel)     │
-│  - State caching and management                                 │
-│  - Zone friendly names management                               │
-│  - Device password storage for auto-sync                        │
-│  - Web UI for testing and management                            │
+│  - Autenticação OAuth 2.0 com Intelbras Cloud                   │
+│  - Refresh automático de token                                  │
+│  - Protocolo ISECNet (comunicação direta com a central)         │
+│  - Cache e gerenciamento de estado                              │
+│  - Gerenciamento de nomes amigáveis das zonas                   │
+│  - Armazenamento de senha do dispositivo para auto-sync         │
+│  - Web UI para testes e gerenciamento                           │
 └───────────────────────────┬─────────────────────────────────────┘
                             │ HTTPS + ISECNet
 ┌───────────────────────────▼─────────────────────────────────────┐
-│  INTELBRAS INFRASTRUCTURE                                       │
+│  INFRAESTRUTURA INTELBRAS                                       │
 │                                                                 │
 │  ┌─────────────────────┐    ┌─────────────────────────────────┐│
-│  │  Cloud API          │    │  IP Receiver (Relay)            ││
-│  │  api-guardian...    │    │  Forwards ISECNet commands      ││
-│  │  :8443              │    │  to alarm panel                 ││
+│  │  API Cloud          │    │  Receptor IP (Relay)            ││
+│  │  api-guardian...    │    │  Encaminha comandos ISECNet     ││
+│  │  :8443              │    │  para a central de alarme       ││
 │  └──────────┬──────────┘    └─────────────┬───────────────────┘│
 │             │                             │                     │
 │             └──────────────┬──────────────┘                     │
 │                            │                                    │
 │  ┌─────────────────────────▼───────────────────────────────────┐│
-│  │            ALARM PANEL (AMT, ANM, etc)                      ││
+│  │            CENTRAL DE ALARME (AMT, ANM, etc)                ││
 │  │                                                             ││
-│  │  - Partitions (areas that can be armed independently)       ││
-│  │  - Zones (sensors: doors, windows, motion, etc)             ││
-│  │  - ISECNet Protocol V1/V2 for communication                 ││
+│  │  - Partições (áreas que podem ser armadas independentemente)││
+│  │  - Zonas (sensores: portas, janelas, movimento, etc)        ││
+│  │  - Protocolo ISECNet V1/V2 para comunicação                 ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-## How It Works
+## Como Funciona
 
-### Communication Flow
+### Fluxo de Comunicação
 
-1. **Authentication**: User logs in with Intelbras account credentials. FastAPI obtains OAuth 2.0 tokens from Intelbras Cloud.
+1. **Autenticação**: Usuário faz login com credenciais da conta Intelbras. FastAPI obtém tokens OAuth 2.0 do Intelbras Cloud.
 
-2. **Device Discovery**: FastAPI queries Intelbras Cloud API to list registered alarm panels (centrais) with their partitions and zones.
+2. **Descoberta de Dispositivos**: FastAPI consulta a API do Intelbras Cloud para listar centrais de alarme registradas com suas partições e zonas.
 
-3. **Real-Time Status (ISECNet Protocol)**:
-   - FastAPI connects to Intelbras IP Receiver
-   - Sends ISECNet commands directly to the alarm panel
-   - Receives real-time status: arm/disarm state, open zones, triggered alarms
-   - This bypasses cloud latency for status updates
+3. **Status em Tempo Real (Protocolo ISECNet)**:
+   - FastAPI conecta ao Receptor IP da Intelbras
+   - Envia comandos ISECNet diretamente para a central de alarme
+   - Recebe status em tempo real: estado armado/desarmado, zonas abertas, alarmes disparados
+   - Isso evita a latência da nuvem para atualizações de status
 
-4. **Arm/Disarm Commands**:
-   - Home Assistant sends command to FastAPI
-   - FastAPI sends ISECNet command via IP Receiver to alarm panel
-   - Panel executes command and returns result
-   - Status is updated immediately
+4. **Comandos de Armar/Desarmar**:
+   - Home Assistant envia comando para FastAPI
+   - FastAPI envia comando ISECNet via Receptor IP para a central
+   - Central executa o comando e retorna resultado
+   - Status é atualizado imediatamente
 
-5. **Zone Monitoring**:
-   - ISECNet provides real-time zone status (open/closed)
-   - Friendly names can be assigned to zones via FastAPI
-   - Binary sensors in Home Assistant reflect zone state
+5. **Monitoramento de Zonas**:
+   - ISECNet fornece status em tempo real das zonas (aberta/fechada)
+   - Nomes amigáveis podem ser atribuídos às zonas via FastAPI
+   - Sensores binários no Home Assistant refletem o estado das zonas
 
-### ISECNet Protocol
+### Protocolo ISECNet
 
-ISECNet is Intelbras' proprietary protocol for direct communication with alarm panels:
+ISECNet é o protocolo proprietário da Intelbras para comunicação direta com centrais de alarme:
 
-- **Version 1**: Basic commands (arm, disarm, status)
-- **Version 2**: Extended features (zone names, PGM control)
+- **Versão 1**: Comandos básicos (armar, desarmar, status)
+- **Versão 2**: Recursos estendidos (nomes de zonas, controle de PGM)
 
-The protocol uses:
-- TCP connection via Intelbras IP Receiver
-- Binary packet format with CRC validation
-- Password-based authentication per device
-- Encryption for sensitive data
+O protocolo usa:
+- Conexão TCP via Receptor IP da Intelbras
+- Formato de pacote binário com validação CRC
+- Autenticação baseada em senha por dispositivo
+- Criptografia para dados sensíveis
 
-### Supported Devices
+### Dispositivos Suportados
 
-- **Alarm Panels**: AMT 2008, AMT 2010, AMT 2018, AMT 4010, ANM series
-- **Electric Fences (Eletrificadores)**: ELC 5001, ELC 5002
+- **Centrais de Alarme**: AMT 2008, AMT 2010, AMT 2018, AMT 4010, série ANM
+- **Eletrificadores**: ELC 5001, ELC 5002
 
-## Features
+## Funcionalidades
 
-### Alarm Control Panel
-- Arm/disarm partitions
-- Arm modes: Away (total) and Home (stay/perimeter)
-- Triggered state detection
-- Real-time status via ISECNet
+### Painel de Controle de Alarme
+- Armar/desarmar partições
+- Modos de arme: Ausente (total) e Em Casa (stay/perímetro)
+- Detecção de estado disparado
+- Status em tempo real via ISECNet
 
-### Zone Sensors (Binary Sensors)
-- Real-time open/closed status
-- Customizable friendly names
-- Device class based on zone type (door, window, motion, smoke, etc.)
-- Bypass status attribute
+### Sensores de Zona (Sensores Binários)
+- Status em tempo real aberto/fechado
+- Nomes amigáveis personalizáveis
+- Classe de dispositivo baseada no tipo de zona (porta, janela, movimento, fumaça, etc.)
+- Atributo de status de bypass
 
-### Electric Fence Control (Switches)
-- **Shock Switch**: Enable/disable electric shock
-- **Alarm Switch**: Arm/disarm fence alarm
+### Controle de Eletrificador (Switches)
+- **Switch de Choque**: Habilitar/desabilitar choque elétrico
+- **Switch de Alarme**: Armar/desarmar alarme da cerca
 
-### Event Sensor
-- Last event information
-- Event history attributes
+### Sensor de Evento
+- Informação do último evento
+- Atributos do histórico de eventos
 
-## Quick Start
+## Início Rápido
 
-### Prerequisites
+### Pré-requisitos
 
-- Docker and Docker Compose
-- Home Assistant 2023.x or later
-- Intelbras Guardian alarm system with cloud access
-- Intelbras account (email + password)
-- Device password (programmed in alarm panel)
+- Docker e Docker Compose
+- Home Assistant 2023.x ou posterior
+- Sistema de alarme Intelbras Guardian com acesso à nuvem
+- Conta Intelbras (email + senha)
+- Senha do dispositivo (programada na central de alarme)
 
-### 1. Deploy FastAPI Middleware
+### 1. Instalar Middleware FastAPI
 
 ```bash
-# Clone the repository
+# Clonar o repositório
 git clone https://github.com/bobaoapae/guardian-api-intelbras.git
 cd guardian-api-intelbras
 
-# Configure environment
+# Configurar ambiente
 cd fastapi_middleware
 cp .env.example .env
-# Edit .env and add your Home Assistant URL to CORS_ORIGINS
+# Edite .env e adicione a URL do seu Home Assistant em CORS_ORIGINS
 
-# Start the container
+# Iniciar o container
 cd ../docker
 docker-compose up -d
 
-# Verify it's running
+# Verificar se está rodando
 curl http://localhost:8000/api/v1/health
 ```
 
-### 2. Access Web UI
+### 2. Acessar Web UI
 
-Open http://localhost:8000 in your browser to:
-- Test login with your Intelbras credentials
-- View devices and their status
-- Save device passwords for auto-sync
-- Configure zone friendly names
-- Test arm/disarm commands
+Abra http://localhost:8000 no navegador para:
+- Testar login com suas credenciais Intelbras
+- Ver dispositivos e seus status
+- Salvar senhas dos dispositivos para auto-sync
+- Configurar nomes amigáveis das zonas
+- Testar comandos de armar/desarmar
 
-### 3. Install Home Assistant Integration
+### 3. Instalar Integração do Home Assistant
 
 ```bash
-# Copy integration to Home Assistant
+# Copiar integração para o Home Assistant
 cp -r home_assistant/custom_components/intelbras_guardian \
       /config/custom_components/
 
-# Restart Home Assistant
+# Reiniciar Home Assistant
 ```
 
-### 4. Configure Integration
+### 4. Configurar Integração
 
-1. Go to **Settings** -> **Devices & Services** -> **Add Integration**
-2. Search for "**Intelbras Guardian**"
-3. Enter:
-   - **Email**: Your Intelbras account email
-   - **Password**: Your Intelbras account password
-   - **FastAPI Host**: IP of the FastAPI container (e.g., 192.168.1.100)
-   - **FastAPI Port**: 8000 (default)
+1. Vá em **Configurações** → **Dispositivos e Serviços** → **Adicionar Integração**
+2. Procure por "**Intelbras Guardian**"
+3. Preencha:
+   - **Email**: Email da sua conta Intelbras
+   - **Senha**: Senha da sua conta Intelbras
+   - **Host FastAPI**: IP do container FastAPI (ex: 192.168.1.100)
+   - **Porta FastAPI**: 8000 (padrão)
 
-### 5. Save Device Password
+### 5. Salvar Senha do Dispositivo
 
-For real-time status via ISECNet:
-1. Open FastAPI Web UI (http://localhost:8000)
-2. Login with your Intelbras account
-3. Click "Save Password" on your device
-4. Enter the device password (configured in alarm panel)
-5. Status will now sync automatically
+Para status em tempo real via ISECNet:
 
-## API Endpoints
+**Opção A - Via Home Assistant:**
+- Configurações → Dispositivos e Serviços → Intelbras Guardian → Configurar → Configurar Senha do Dispositivo
 
-### Authentication
-- `POST /api/v1/auth/login` - Login with Intelbras credentials
-- `POST /api/v1/auth/logout` - Logout and invalidate session
-- `GET /api/v1/auth/session` - Get current session info
+**Opção B - Via Web UI:**
+1. Abra a Web UI do FastAPI (http://localhost:8000)
+2. Faça login com suas credenciais Intelbras
+3. Clique em "Salvar Senha" no seu dispositivo
+4. Insira a senha do dispositivo (configurada na central de alarme)
+5. O status agora sincronizará automaticamente
 
-### Devices
-- `GET /api/v1/devices` - List all alarm panels
-- `GET /api/v1/devices/{id}` - Get device details
+## Endpoints da API
 
-### Alarm Control
-- `POST /api/v1/alarm/{device_id}/arm` - Arm partition
-- `POST /api/v1/alarm/{device_id}/disarm` - Disarm partition
-- `GET /api/v1/alarm/{device_id}/status` - Get real-time status (requires password)
-- `GET /api/v1/alarm/{device_id}/status/auto` - Get status using saved password
+### Autenticação
+- `POST /api/v1/auth/login` - Login com credenciais Intelbras
+- `POST /api/v1/auth/logout` - Logout e invalidar sessão
+- `GET /api/v1/auth/session` - Obter informações da sessão atual
 
-### Password Management
-- `POST /api/v1/devices/{device_id}/password` - Save device password
-- `DELETE /api/v1/devices/{device_id}/password` - Delete saved password
+### Dispositivos
+- `GET /api/v1/devices` - Listar todas as centrais de alarme
+- `GET /api/v1/devices/{id}` - Obter detalhes do dispositivo
 
-### Zones
-- `GET /api/v1/devices/{device_id}/zones` - Get zones with friendly names
-- `PUT /api/v1/devices/{device_id}/zones/{zone_index}/friendly-name` - Set friendly name
-- `DELETE /api/v1/devices/{device_id}/zones/{zone_index}/friendly-name` - Delete friendly name
+### Controle de Alarme
+- `POST /api/v1/alarm/{device_id}/arm` - Armar partição
+- `POST /api/v1/alarm/{device_id}/disarm` - Desarmar partição
+- `GET /api/v1/alarm/{device_id}/status` - Obter status em tempo real (requer senha)
+- `GET /api/v1/alarm/{device_id}/status/auto` - Obter status usando senha salva
 
-### Events
-- `GET /api/v1/events` - Get alarm event history
+### Gerenciamento de Senha
+- `POST /api/v1/devices/{device_id}/password` - Salvar senha do dispositivo
+- `DELETE /api/v1/devices/{device_id}/password` - Excluir senha salva
 
-### Electric Fence (Eletrificador)
-- `POST /api/v1/eletrificador/{device_id}/shock/on` - Enable shock
-- `POST /api/v1/eletrificador/{device_id}/shock/off` - Disable shock
-- `POST /api/v1/eletrificador/{device_id}/alarm/activate` - Arm alarm
-- `POST /api/v1/eletrificador/{device_id}/alarm/deactivate` - Disarm alarm
+### Zonas
+- `GET /api/v1/devices/{device_id}/zones` - Obter zonas com nomes amigáveis
+- `PUT /api/v1/devices/{device_id}/zones/{zone_index}/friendly-name` - Definir nome amigável
+- `DELETE /api/v1/devices/{device_id}/zones/{zone_index}/friendly-name` - Excluir nome amigável
 
-## Project Structure
+### Eventos
+- `GET /api/v1/events` - Obter histórico de eventos do alarme
+
+### Eletrificador
+- `POST /api/v1/eletrificador/{device_id}/shock/on` - Habilitar choque
+- `POST /api/v1/eletrificador/{device_id}/shock/off` - Desabilitar choque
+- `POST /api/v1/eletrificador/{device_id}/alarm/activate` - Armar alarme
+- `POST /api/v1/eletrificador/{device_id}/alarm/deactivate` - Desarmar alarme
+
+## Estrutura do Projeto
 
 ```
 guardian-api-intelbras/
-├── fastapi_middleware/           # FastAPI middleware
+├── intelbras-guardian-api/           # Add-on do Home Assistant
+│   ├── config.yaml                   # Configuração do add-on
+│   ├── Dockerfile                    # Build da imagem
+│   ├── build.yaml                    # Build multi-arquitetura
+│   └── run.sh                        # Script de inicialização
+├── fastapi_middleware/               # Middleware FastAPI
 │   ├── app/
-│   │   ├── main.py              # Application entry point
-│   │   ├── core/                # Config, exceptions, security
-│   │   ├── models/              # Pydantic models
-│   │   ├── services/            # Business logic
-│   │   │   ├── guardian_client.py    # Intelbras Cloud API client
-│   │   │   ├── auth_service.py       # OAuth 2.0 authentication
-│   │   │   ├── state_manager.py      # State/cache management
-│   │   │   └── isecnet_protocol.py   # ISECNet implementation
-│   │   ├── api/v1/              # REST endpoints
-│   │   └── static/              # Web UI
-│   └── tests/                   # Tests
-├── docker/                      # Docker configuration
+│   │   ├── main.py                   # Ponto de entrada da aplicação
+│   │   ├── core/                     # Config, exceções, segurança
+│   │   ├── models/                   # Modelos Pydantic
+│   │   ├── services/                 # Lógica de negócio
+│   │   │   ├── guardian_client.py    # Cliente da API Intelbras Cloud
+│   │   │   ├── auth_service.py       # Autenticação OAuth 2.0
+│   │   │   ├── state_manager.py      # Gerenciamento de estado/cache
+│   │   │   └── isecnet_protocol.py   # Implementação ISECNet
+│   │   ├── api/v1/                   # Endpoints REST
+│   │   └── static/                   # Web UI
+│   └── tests/                        # Testes
+├── docker/                           # Configuração Docker
 │   ├── Dockerfile
 │   └── docker-compose.yml
-├── home_assistant/              # Home Assistant integration
+├── home_assistant/                   # Integração Home Assistant
 │   └── custom_components/
 │       └── intelbras_guardian/
 │           ├── __init__.py
@@ -281,26 +291,26 @@ guardian-api-intelbras/
 │           ├── sensor.py
 │           ├── switch.py
 │           └── const.py
-└── docs/                        # Documentation
+└── docs/                             # Documentação
 ```
 
-## Environment Variables
+## Variáveis de Ambiente
 
 ### FastAPI (.env)
 
 ```env
-# Intelbras API (do not change)
+# API Intelbras (não alterar)
 INTELBRAS_API_URL=https://api-guardian.intelbras.com.br:8443
 INTELBRAS_OAUTH_URL=https://api.conta.intelbras.com/auth
 INTELBRAS_CLIENT_ID=xHCEFEMoQnBcIHcw8ACqbU9aZaYa
 
-# Server
+# Servidor
 HOST=0.0.0.0
 PORT=8000
 DEBUG=false
 LOG_LEVEL=INFO
 
-# CORS (add your Home Assistant URL)
+# CORS (adicione a URL do seu Home Assistant)
 CORS_ORIGINS=http://localhost:8123,http://homeassistant.local:8123
 
 # Timeouts
@@ -309,37 +319,37 @@ TOKEN_REFRESH_BUFFER=300
 EVENT_POLL_INTERVAL=30
 ```
 
-## Security Considerations
+## Considerações de Segurança
 
-- **Credentials**: Never commit `.env` files with credentials
-- **HTTPS**: Use a reverse proxy with SSL in production
-- **CORS**: Restrict `CORS_ORIGINS` to trusted domains only
-- **Device Passwords**: Stored encrypted in memory, not persisted to disk
-- **Logging**: Sensitive data (passwords, tokens) are automatically filtered from logs
+- **Credenciais**: Nunca faça commit de arquivos `.env` com credenciais
+- **HTTPS**: Use um proxy reverso com SSL em produção
+- **CORS**: Restrinja `CORS_ORIGINS` apenas a domínios confiáveis
+- **Senhas de Dispositivo**: Armazenadas criptografadas em memória, não persistidas em disco
+- **Logs**: Dados sensíveis (senhas, tokens) são automaticamente filtrados dos logs
 
-## Troubleshooting
+## Solução de Problemas
 
-### "Cannot connect to FastAPI middleware"
-- Check if FastAPI container is running: `docker ps`
-- Verify the host/port configuration
-- Check firewall rules
+### "Não foi possível conectar ao middleware FastAPI"
+- Verifique se o container FastAPI está rodando: `docker ps`
+- Verifique a configuração de host/porta
+- Verifique regras de firewall
 
-### "Invalid credentials"
-- Verify your Intelbras account email and password
-- Try logging in at https://guardian.intelbras.com.br
+### "Credenciais inválidas"
+- Verifique seu email e senha da conta Intelbras
+- Tente fazer login em https://guardian.intelbras.com.br
 
-### Arm/Disarm not working
-- Ensure device password is saved correctly
-- Check if device is online in Intelbras app
-- Verify ISECNet connection in FastAPI logs
+### Armar/Desarmar não funciona
+- Verifique se a senha do dispositivo está salva corretamente
+- Verifique se o dispositivo está online no app Intelbras
+- Verifique a conexão ISECNet nos logs do FastAPI
 
-### Zones showing wrong status
-- Save device password for real-time ISECNet status
-- Check if zones are configured correctly in alarm panel
+### Zonas mostrando status errado
+- Salve a senha do dispositivo para status em tempo real via ISECNet
+- Verifique se as zonas estão configuradas corretamente na central de alarme
 
-## Development
+## Desenvolvimento
 
-### Running FastAPI locally
+### Executar FastAPI localmente
 
 ```bash
 cd fastapi_middleware
@@ -349,46 +359,46 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### Swagger UI
 
-Access interactive API documentation at: http://localhost:8000/docs
+Acesse documentação interativa da API em: http://localhost:8000/docs
 
 ## Roadmap
 
-- [ ] Push notifications via Firebase Cloud Messaging
-- [ ] PGM (programmable output) control
-- [ ] Zone bypass functionality
-- [ ] Local ISECNet support (without cloud relay)
-- [ ] Google Assistant / Alexa integration
+- [ ] Notificações push via Firebase Cloud Messaging
+- [ ] Controle de PGM (saída programável)
+- [ ] Funcionalidade de bypass de zona
+- [ ] Suporte a ISECNet local (sem relay da nuvem)
+- [ ] Integração com Google Assistant / Alexa
 
-## Contributing
+## Contribuindo
 
-Contributions are welcome! Please:
+Contribuições são bem-vindas! Por favor:
 
-1. Test with your Intelbras alarm system
-2. Report issues with detailed logs
-3. Submit pull requests with improvements
+1. Teste com seu sistema de alarme Intelbras
+2. Reporte issues com logs detalhados
+3. Envie pull requests com melhorias
 
-## License
+## Licença
 
-MIT License - see [LICENSE](LICENSE) file for details.
+Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
 
-## Disclaimer
+## Aviso Legal
 
-**THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.**
+**ESTE SOFTWARE É FORNECIDO "COMO ESTÁ", SEM GARANTIA DE QUALQUER TIPO.**
 
-- This project is **NOT affiliated with, endorsed by, or associated with Intelbras** in any way
-- Use of this software is **entirely at your own risk**
-- The authors are **not responsible** for any damage, loss, or security issues that may result from using this software
-- This software interacts with security systems - **improper use could compromise your security**
-- Always ensure your alarm system is properly configured and tested
-- Do not rely solely on this integration for security-critical applications
+- Este projeto **NÃO É afiliado, endossado ou associado à Intelbras** de nenhuma forma
+- O uso deste software é **inteiramente por sua conta e risco**
+- Os autores **não são responsáveis** por qualquer dano, perda ou problema de segurança que possa resultar do uso deste software
+- Este software interage com sistemas de segurança - **uso inadequado pode comprometer sua segurança**
+- Sempre certifique-se de que seu sistema de alarme está devidamente configurado e testado
+- Não dependa exclusivamente desta integração para aplicações críticas de segurança
 
-By using this software, you acknowledge that you understand and accept these terms.
+Ao usar este software, você reconhece que entende e aceita estes termos.
 
-## Support
+## Suporte
 
 - **Issues**: https://github.com/bobaoapae/guardian-api-intelbras/issues
-- **Documentation**: Check the `/docs` folder
+- **Documentação**: Verifique a pasta `/docs`
 
 ---
 
-**Made for the Home Assistant community**
+**Feito para a comunidade Home Assistant**

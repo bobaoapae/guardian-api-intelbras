@@ -1,99 +1,118 @@
-# Deployment Guide
+# Guia de Instalação
 
-Complete instructions for deploying the Intelbras Guardian integration.
+Instruções completas para instalar a integração Intelbras Guardian.
 
-## Prerequisites
+## Pré-requisitos
 
-- Docker and Docker Compose installed
-- Home Assistant 2023.x or later
-- Network access to Intelbras cloud services
-- Intelbras Guardian account (email + password)
-- Alarm panel device password
+- Docker e Docker Compose instalados
+- Home Assistant 2023.x ou posterior
+- Acesso à rede para serviços cloud da Intelbras
+- Conta Intelbras Guardian (email + senha)
+- Senha do painel de alarme
 
-## Architecture Overview
+## Visão Geral da Arquitetura
 
 ```
 ┌────────────────────┐     ┌────────────────────┐     ┌──────────────────┐
-│   Home Assistant   │────▶│  FastAPI Container │────▶│  Intelbras Cloud │
-│   (your server)    │     │  (Docker)          │     │  + IP Receiver   │
+│   Home Assistant   │────▶│  Container FastAPI │────▶│  Intelbras Cloud │
+│   (seu servidor)   │     │  (Docker)          │     │  + Receptor IP   │
 └────────────────────┘     └────────────────────┘     └──────────────────┘
 ```
 
-The FastAPI middleware container can run:
-- On the same machine as Home Assistant
-- On a separate server in your network
-- On a VPS/cloud server (not recommended for latency)
+O container do middleware FastAPI pode rodar:
+- Na mesma máquina do Home Assistant
+- Em um servidor separado na sua rede
+- Em um VPS/servidor cloud (não recomendado por latência)
 
-## Option 1: Docker Compose (Recommended)
+## Opção 1: Add-on do Home Assistant (Recomendado)
 
-### Step 1: Clone Repository
+Se você usa Home Assistant OS ou Supervised:
+
+### Passo 1: Adicionar Repositório
+
+Clique no botão abaixo ou adicione manualmente:
+
+[![Adicionar Repositório](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbobaoapae%2Fguardian-api-intelbras)
+
+Manualmente: **Configurações** → **Add-ons** → **Loja de Add-ons** → **⋮** → **Repositórios** → Adicione `https://github.com/bobaoapae/guardian-api-intelbras`
+
+### Passo 2: Instalar Add-on
+
+1. Encontre "**Intelbras Guardian API**" na loja
+2. Clique em **Instalar**
+3. Inicie o add-on
+4. Acesse a Web UI em `http://[SEU_IP_HA]:8000`
+
+## Opção 2: Docker Compose (Standalone)
+
+### Passo 1: Clonar Repositório
 
 ```bash
 git clone https://github.com/bobaoapae/guardian-api-intelbras.git
 cd guardian-api-intelbras
 ```
 
-### Step 2: Configure Environment
+### Passo 2: Configurar Ambiente
 
 ```bash
 cd fastapi_middleware
 cp .env.example .env
 ```
 
-Edit `.env` with your settings:
+Edite `.env` com suas configurações:
 
 ```env
-# Server
+# Servidor
 HOST=0.0.0.0
 PORT=8000
 DEBUG=false
 LOG_LEVEL=INFO
 
-# CORS - Add your Home Assistant URL
+# CORS - Adicione a URL do seu Home Assistant
 CORS_ORIGINS=http://localhost:8123,http://192.168.1.100:8123,http://homeassistant.local:8123
 
-# Intelbras API (do not change these)
+# API Intelbras (não altere estes valores)
 INTELBRAS_API_URL=https://api-guardian.intelbras.com.br:8443
 INTELBRAS_OAUTH_URL=https://api.conta.intelbras.com/auth
 INTELBRAS_CLIENT_ID=xHCEFEMoQnBcIHcw8ACqbU9aZaYa
 ```
 
-### Step 3: Start Container
+### Passo 3: Iniciar Container
 
 ```bash
 cd ../docker
 docker-compose up -d
 ```
 
-### Step 4: Verify Installation
+### Passo 4: Verificar Instalação
 
 ```bash
-# Check container is running
+# Verificar se o container está rodando
 docker ps
 
-# Check health endpoint
+# Verificar endpoint de health
 curl http://localhost:8000/api/v1/health
 
-# Check logs
+# Verificar logs
 docker logs intelbras-guardian-api
 ```
 
-### Step 5: Access Web UI
+### Passo 5: Acessar Web UI
 
-Open http://localhost:8000 in your browser to:
-- Test login with your credentials
-- Verify devices are listed
-- Save device passwords
-- Test arm/disarm functionality
+Abra http://localhost:8000 no navegador para:
+- Testar login com suas credenciais
+- Verificar se os dispositivos são listados
+- Salvar senhas dos dispositivos
+- Testar funcionalidade de armar/desarmar
 
-## Option 2: Manual Docker
+## Opção 3: Docker Manual
 
 ```bash
-# Build image
+# Build da imagem
 cd fastapi_middleware
 docker build -t intelbras-guardian-api -f ../docker/Dockerfile .
 
-# Run container
+# Rodar container
 docker run -d \
   --name intelbras-guardian-api \
   -p 8000:8000 \
@@ -104,82 +123,82 @@ docker run -d \
   intelbras-guardian-api
 ```
 
-## Option 3: Direct Python (Development)
+## Opção 4: Python Direto (Desenvolvimento)
 
 ```bash
 cd fastapi_middleware
 
-# Create virtual environment
+# Criar ambiente virtual
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
+# ou: venv\Scripts\activate  # Windows
 
-# Install dependencies
+# Instalar dependências
 pip install -r requirements.txt
 
-# Configure environment
+# Configurar ambiente
 cp .env.example .env
-# Edit .env as needed
+# Edite .env conforme necessário
 
-# Run server
+# Rodar servidor
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-## Home Assistant Integration Setup
+## Configuração da Integração Home Assistant
 
-### Step 1: Copy Integration Files
+### Passo 1: Copiar Arquivos da Integração
 
 ```bash
-# If Home Assistant is on the same machine
+# Se o Home Assistant está na mesma máquina
 cp -r home_assistant/custom_components/intelbras_guardian \
       /config/custom_components/
 
-# Or via SSH/SCP
+# Ou via SSH/SCP
 scp -r home_assistant/custom_components/intelbras_guardian \
-      user@homeassistant:/config/custom_components/
+      usuario@homeassistant:/config/custom_components/
 ```
 
-### Step 2: Restart Home Assistant
+### Passo 2: Reiniciar Home Assistant
 
-Go to **Settings** → **System** → **Restart**
+Vá em **Configurações** → **Sistema** → **Reiniciar**
 
-Or via CLI:
+Ou via CLI:
 ```bash
 ha core restart
 ```
 
-### Step 3: Add Integration
+### Passo 3: Adicionar Integração
 
-1. Go to **Settings** → **Devices & Services**
-2. Click **Add Integration**
-3. Search for "**Intelbras Guardian**"
-4. Enter configuration:
-   - **Email**: Your Intelbras account email
-   - **Password**: Your Intelbras account password
-   - **FastAPI Host**: IP address of FastAPI container
-   - **FastAPI Port**: 8000 (default)
+1. Vá em **Configurações** → **Dispositivos e Serviços**
+2. Clique em **Adicionar Integração**
+3. Procure por "**Intelbras Guardian**"
+4. Preencha a configuração:
+   - **Email**: Email da sua conta Intelbras
+   - **Senha**: Senha da sua conta Intelbras
+   - **Host FastAPI**: Endereço IP do container FastAPI
+   - **Porta FastAPI**: 8000 (padrão)
 
-### Step 4: Verify Entities
+### Passo 4: Verificar Entidades
 
-After setup, you should see:
-- `alarm_control_panel.intelbras_guardian_*` - One per partition
-- `binary_sensor.intelbras_guardian_*` - One per zone
-- `sensor.intelbras_guardian_last_event` - Event sensor
-- `switch.intelbras_guardian_*` - For eletrificadores (if applicable)
+Após a configuração, você deve ver:
+- `alarm_control_panel.intelbras_guardian_*` - Uma por partição
+- `binary_sensor.intelbras_guardian_*` - Um por zona
+- `sensor.intelbras_guardian_ultimo_evento` - Sensor de eventos
+- `switch.intelbras_guardian_*` - Para eletrificadores (se aplicável)
 
-## Production Considerations
+## Considerações para Produção
 
-### HTTPS with Reverse Proxy (nginx)
+### HTTPS com Proxy Reverso (nginx)
 
-For production, use nginx as a reverse proxy with SSL:
+Para produção, use nginx como proxy reverso com SSL:
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name guardian-api.yourdomain.com;
+    server_name guardian-api.seudominio.com;
 
-    ssl_certificate /etc/ssl/certs/your-cert.pem;
-    ssl_certificate_key /etc/ssl/private/your-key.pem;
+    ssl_certificate /etc/ssl/certs/seu-cert.pem;
+    ssl_certificate_key /etc/ssl/private/sua-chave.pem;
 
     location / {
         proxy_pass http://localhost:8000;
@@ -191,9 +210,9 @@ server {
 }
 ```
 
-### Systemd Service (without Docker)
+### Serviço Systemd (sem Docker)
 
-Create `/etc/systemd/system/intelbras-guardian.service`:
+Crie `/etc/systemd/system/intelbras-guardian.service`:
 
 ```ini
 [Unit]
@@ -213,15 +232,15 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
-Enable and start:
+Habilite e inicie:
 ```bash
 sudo systemctl enable intelbras-guardian
 sudo systemctl start intelbras-guardian
 ```
 
-### Firewall Configuration
+### Configuração de Firewall
 
-Open only the necessary port:
+Abra apenas a porta necessária:
 
 ```bash
 # UFW (Ubuntu)
@@ -232,14 +251,14 @@ sudo firewall-cmd --zone=internal --add-port=8000/tcp --permanent
 sudo firewall-cmd --reload
 ```
 
-### Resource Limits (Docker)
+### Limites de Recursos (Docker)
 
-Add to `docker-compose.yml`:
+Adicione ao `docker-compose.yml`:
 
 ```yaml
 services:
   fastapi:
-    # ... existing config ...
+    # ... configuração existente ...
     deploy:
       resources:
         limits:
@@ -250,7 +269,7 @@ services:
           memory: 128M
 ```
 
-## Updating
+## Atualização
 
 ### Docker Compose
 
@@ -262,74 +281,74 @@ docker-compose build
 docker-compose up -d
 ```
 
-### Home Assistant Integration
+### Integração Home Assistant
 
 ```bash
-# Remove old files
+# Remover arquivos antigos
 rm -rf /config/custom_components/intelbras_guardian
 
-# Copy new files
+# Copiar novos arquivos
 cp -r home_assistant/custom_components/intelbras_guardian \
       /config/custom_components/
 
-# Restart Home Assistant
+# Reiniciar Home Assistant
 ```
 
-## Troubleshooting
+## Solução de Problemas
 
-### Container won't start
+### Container não inicia
 
-Check logs:
+Verifique os logs:
 ```bash
 docker logs intelbras-guardian-api
 ```
 
-Common issues:
-- Port 8000 already in use
-- Invalid environment variables
-- Network connectivity problems
+Problemas comuns:
+- Porta 8000 já em uso
+- Variáveis de ambiente inválidas
+- Problemas de conectividade de rede
 
-### Cannot connect from Home Assistant
+### Não consegue conectar do Home Assistant
 
-1. Verify container is running: `docker ps`
-2. Check container IP: `docker inspect intelbras-guardian-api | grep IPAddress`
-3. Test from HA machine: `curl http://container-ip:8000/api/v1/health`
-4. Check firewall rules
+1. Verifique se o container está rodando: `docker ps`
+2. Verifique o IP do container: `docker inspect intelbras-guardian-api | grep IPAddress`
+3. Teste da máquina do HA: `curl http://ip-do-container:8000/api/v1/health`
+4. Verifique regras de firewall
 
-### Authentication fails
+### Falha na autenticação
 
-1. Verify credentials work at https://guardian.intelbras.com.br
-2. Check FastAPI logs for detailed error
-3. Ensure Intelbras cloud services are accessible
+1. Verifique se as credenciais funcionam em https://guardian.intelbras.com.br
+2. Verifique os logs do FastAPI para erro detalhado
+3. Certifique-se de que os serviços cloud da Intelbras estão acessíveis
 
-### Arm/Disarm not working
+### Armar/Desarmar não funciona
 
-1. Verify device password is correct (same as in official app)
-2. Check ISECNet connection in logs
-3. Ensure device is online and connected
+1. Verifique se a senha do dispositivo está correta (mesma do app oficial)
+2. Verifique a conexão ISECNet nos logs
+3. Certifique-se de que o dispositivo está online e conectado
 
-## Backup and Recovery
+## Backup e Recuperação
 
 ### Backup
 
-Important data to backup:
-- `.env` file (contains configuration)
-- Home Assistant config entry (automatically stored)
+Dados importantes para backup:
+- Arquivo `.env` (contém configuração)
+- Config entry do Home Assistant (armazenado automaticamente)
 
-Note: Device passwords and zone friendly names are stored in memory and will be lost on container restart. Re-save them via Web UI after restart.
+Nota: Senhas de dispositivos e nomes amigáveis de zonas são armazenados em memória e serão perdidos ao reiniciar o container. Salve-os novamente via Web UI após reiniciar.
 
-### Recovery
+### Recuperação
 
-1. Restore `.env` file
-2. Start container
-3. Re-authenticate in Home Assistant
-4. Re-save device passwords via Web UI
+1. Restaure o arquivo `.env`
+2. Inicie o container
+3. Re-autentique no Home Assistant
+4. Salve novamente as senhas dos dispositivos via Web UI
 
-## Monitoring
+## Monitoramento
 
 ### Health Check
 
-The container includes a health check. Monitor with:
+O container inclui health check. Monitore com:
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' intelbras-guardian-api
@@ -337,14 +356,14 @@ docker inspect --format='{{.State.Health.Status}}' intelbras-guardian-api
 
 ### Logs
 
-View real-time logs:
+Visualize logs em tempo real:
 ```bash
 docker logs -f intelbras-guardian-api
 ```
 
-### Metrics (Optional)
+### Métricas (Opcional)
 
-For production monitoring, consider adding:
-- Prometheus metrics endpoint
-- Grafana dashboards
-- Alert rules for failures
+Para monitoramento em produção, considere adicionar:
+- Endpoint de métricas Prometheus
+- Dashboards Grafana
+- Regras de alerta para falhas
