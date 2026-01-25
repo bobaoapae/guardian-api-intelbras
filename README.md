@@ -20,11 +20,37 @@ Se você usa Home Assistant OS ou Supervised, pode instalar a API como add-on:
 
 4. Instale a integração do Home Assistant (veja abaixo)
 
-### Opção 2: Docker Compose (Standalone)
+### Opção 2: Script de Instalação Automática (Recomendado para Docker)
 
-Para usuários de Docker ou Home Assistant Container, veja [Instalação via Docker](#1-instalar-middleware-fastapi) abaixo.
+Para usuários de Docker ou Home Assistant Container, use o script de instalação interativo:
 
-### Opção 3: Python Manual
+```bash
+# Baixar e executar o instalador
+curl -sSL https://raw.githubusercontent.com/bobaoapae/guardian-api-intelbras/main/install.sh -o install.sh
+chmod +x install.sh
+sudo ./install.sh
+```
+
+O script irá:
+- Verificar pré-requisitos (Docker, Docker Compose)
+- Detectar automaticamente seu Home Assistant
+- Configurar diretórios e volumes
+- Instalar a API e integração do HA
+- Iniciar os serviços
+
+**Outras opções do script:**
+```bash
+./install.sh --help       # Ver todas as opções
+./install.sh -y           # Instalação não-interativa (aceita padrões)
+./install.sh --update     # Atualizar instalação existente
+./install.sh --uninstall  # Remover completamente
+```
+
+### Opção 3: Docker Compose Manual
+
+Para instalação manual via Docker, veja [Instalação via Docker](#1-instalar-middleware-fastapi) abaixo.
+
+### Opção 4: Python Manual
 
 Para desenvolvimento ou configurações personalizadas, veja a seção [Desenvolvimento](#desenvolvimento).
 
