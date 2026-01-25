@@ -55,7 +55,7 @@ cd guardian-api-intelbras
 ### Passo 2: Configurar Ambiente
 
 ```bash
-cd fastapi_middleware
+cd intelbras-guardian-api
 cp .env.example .env
 ```
 
@@ -129,7 +129,7 @@ docker run -d \
 ## Opção 4: Python Direto (Desenvolvimento)
 
 ```bash
-cd fastapi_middleware
+cd intelbras-guardian-api
 
 # Criar ambiente virtual
 python -m venv venv
@@ -225,7 +225,7 @@ After=network.target
 [Service]
 Type=simple
 User=guardian
-WorkingDirectory=/opt/intelbras-guardian/fastapi_middleware
+WorkingDirectory=/opt/intelbras-guardian/intelbras-guardian-api
 Environment=PATH=/opt/intelbras-guardian/venv/bin
 ExecStart=/opt/intelbras-guardian/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always

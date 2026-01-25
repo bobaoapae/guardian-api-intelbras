@@ -8,11 +8,11 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY fastapi_middleware/requirements.txt .
+COPY intelbras-guardian-api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY fastapi_middleware/app ./app
+COPY intelbras-guardian-api/app ./app
 
 # Create data directory for session persistence
 RUN mkdir -p /app/data

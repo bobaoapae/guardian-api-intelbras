@@ -189,7 +189,7 @@ git clone https://github.com/bobaoapae/guardian-api-intelbras.git
 cd guardian-api-intelbras
 
 # Configurar ambiente
-cd fastapi_middleware
+cd intelbras-guardian-api
 cp .env.example .env
 # Edite .env e adicione a URL do seu Home Assistant em CORS_ORIGINS
 
@@ -283,13 +283,8 @@ Para status em tempo real via ISECNet:
 
 ```
 guardian-api-intelbras/
-├── intelbras-guardian-api/           # Add-on do Home Assistant
-│   ├── config.yaml                   # Configuração do add-on
-│   ├── Dockerfile                    # Build da imagem
-│   ├── build.yaml                    # Build multi-arquitetura
-│   └── run.sh                        # Script de inicialização
-├── fastapi_middleware/               # Middleware FastAPI
-│   ├── app/
+├── intelbras-guardian-api/           # API FastAPI + Add-on HA
+│   ├── app/                          # Código da aplicação
 │   │   ├── main.py                   # Ponto de entrada da aplicação
 │   │   ├── core/                     # Config, exceções, segurança
 │   │   ├── models/                   # Modelos Pydantic
@@ -300,9 +295,14 @@ guardian-api-intelbras/
 │   │   │   └── isecnet_protocol.py   # Implementação ISECNet
 │   │   ├── api/v1/                   # Endpoints REST
 │   │   └── static/                   # Web UI
-│   └── tests/                        # Testes
-├── docker/                           # Configuração Docker
-│   ├── Dockerfile
+│   ├── tests/                        # Testes
+│   ├── config.yaml                   # Configuração do add-on HA
+│   ├── Dockerfile                    # Build da imagem (add-on)
+│   ├── build.yaml                    # Build multi-arquitetura
+│   ├── run.sh                        # Script de inicialização
+│   └── requirements.txt              # Dependências Python
+├── docker/                           # Docker Compose Standalone
+│   ├── Dockerfile                    # Build da imagem (standalone)
 │   └── docker-compose.yml
 ├── home_assistant/                   # Integração Home Assistant
 │   └── custom_components/
@@ -378,7 +378,7 @@ EVENT_POLL_INTERVAL=30
 ### Executar FastAPI localmente
 
 ```bash
-cd fastapi_middleware
+cd intelbras-guardian-api
 pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
