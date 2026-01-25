@@ -29,7 +29,7 @@ set -e
 # Variáveis Globais
 #-------------------------------------------------------------------------------
 
-VERSION="1.0.3"
+VERSION="1.0.4"
 GITHUB_REPO="https://github.com/bobaoapae/guardian-api-intelbras"
 GITHUB_ZIP="https://github.com/bobaoapae/guardian-api-intelbras/archive/refs/heads/main.zip"
 
@@ -347,23 +347,15 @@ detect_ha_container() {
     if echo "$HA_IP" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
         print_success "IP detectado: $HA_IP"
     else
-        print_warning "Não foi possível detectar IP automaticamente (detectado: '$HA_IP')"
-        HA_IP=""
+        print_warning "Não foi possível detectar IP automaticamente"
+        # Usar localhost como fallback - CORS será configurado para aceitar qualquer origem local
+        HA_IP="localhost"
+        print_info "Usando 'localhost' - CORS será configurado para rede local"
     fi
 
     # Confirmar ou pedir informações
     if [ "$NON_INTERACTIVE" = false ]; then
         echo ""
-
-        # Pedir IP manualmente se não detectou
-        if [ -z "$HA_IP" ]; then
-            print_info "Por favor, informe o IP manualmente."
-            ask_input "Digite o IP desta máquina" "192.168.1.100" HA_IP
-        else
-            if ! ask_yes_no "Usar IP detectado ($HA_IP)?"; then
-                ask_input "Digite o IP desta máquina" "$HA_IP" HA_IP
-            fi
-        fi
 
         if [ -n "$HA_CONFIG_DIR" ]; then
             if ! ask_yes_no "Usar diretório detectado ($HA_CONFIG_DIR)?"; then
@@ -482,22 +474,11 @@ download_files() {
 configure_cors() {
     print_step "5/12 - Configurando CORS"
 
-    local ha_port
-    ask_input "Porta do Home Assistant" "$DEFAULT_HA_PORT" ha_port
+    # Para uso em rede local, aceitar qualquer origem é seguro e evita problemas
+    CORS_ORIGINS="*"
 
-    # Gerar lista de origens permitidas
-    CORS_ORIGINS="http://localhost:${ha_port}"
-    CORS_ORIGINS="${CORS_ORIGINS},http://127.0.0.1:${ha_port}"
-    CORS_ORIGINS="${CORS_ORIGINS},http://${HA_IP}:${ha_port}"
-    CORS_ORIGINS="${CORS_ORIGINS},http://homeassistant.local:${ha_port}"
-
-    # Adicionar hostname se diferente
-    local hostname=$(hostname)
-    if [ "$hostname" != "localhost" ]; then
-        CORS_ORIGINS="${CORS_ORIGINS},http://${hostname}:${ha_port}"
-    fi
-
-    print_success "CORS configurado para: $CORS_ORIGINS"
+    print_success "CORS configurado para aceitar qualquer origem (rede local)"
+    print_info "Para produção, edite CORS_ORIGINS no docker-compose.override.yml"
 }
 
 #-------------------------------------------------------------------------------
