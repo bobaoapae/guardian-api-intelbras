@@ -986,7 +986,9 @@ update() {
     # Atualizar via git
     if [ -d ".git" ]; then
         print_info "Atualizando via git..."
-        git pull
+        # Descartar alterações locais e forçar atualização
+        git fetch origin
+        git reset --hard origin/main
         print_success "Código atualizado"
     else
         print_warning "Não é um repositório git. Baixando nova versão..."
