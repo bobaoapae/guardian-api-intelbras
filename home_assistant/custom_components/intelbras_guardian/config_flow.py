@@ -146,9 +146,19 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        # Note: self.config_entry is available from parent class in newer HA versions
+        self._config_entry = config_entry
         self._devices: list = []
         self._selected_device_id: Optional[int] = None
+
+    @property
+    def _entry(self) -> config_entries.ConfigEntry:
+        """Get config entry (compatible with all HA versions)."""
+        # Try parent class property first (newer HA), fallback to our stored reference
+        try:
+            return super().config_entry
+        except AttributeError:
+            return self._config_entry
 
     async def async_step_init(
         self,
@@ -168,7 +178,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         # Get coordinator from hass.data
-        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
 
         if user_input is not None:
             callback_url = user_input.get("callback_url", "").strip()
@@ -178,9 +188,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 if await coordinator.client.complete_oauth(callback_url):
                     # Update config entry with new session_id
                     self.hass.config_entries.async_update_entry(
-                        self.config_entry,
+                        self._entry,
                         data={
-                            **self.config_entry.data,
+                            **self._entry.data,
                             CONF_SESSION_ID: coordinator.client.session_id,
                         },
                     )
@@ -198,8 +208,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             if oauth_data:
                 auth_url = oauth_data.get("auth_url", "")
 
-        host = self.config_entry.data.get(CONF_FASTAPI_HOST, "")
-        port = self.config_entry.data.get(CONF_FASTAPI_PORT, DEFAULT_FASTAPI_PORT)
+        host = self._entry.data.get(CONF_FASTAPI_HOST, "")
+        port = self._entry.data.get(CONF_FASTAPI_PORT, DEFAULT_FASTAPI_PORT)
 
         return self.async_show_form(
             step_id="reauth",
@@ -219,7 +229,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         errors: Dict[str, str] = {}
 
         # Get coordinator from hass.data
-        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
         if not coordinator:
             return self.async_abort(reason="not_loaded")
 
@@ -262,7 +272,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Enter or manage device password."""
         errors: Dict[str, str] = {}
 
-        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
         if not coordinator:
             return self.async_abort(reason="not_loaded")
 
@@ -331,7 +341,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="manage_zones",
             description_placeholders={
-                "webui_url": f"http://{self.config_entry.data[CONF_FASTAPI_HOST]}:{self.config_entry.data[CONF_FASTAPI_PORT]}"
+                "webui_url": f"http://{self._entry.data[CONF_FASTAPI_HOST]}:{self._entry.data[CONF_FASTAPI_PORT]}"
             },
         )
 
