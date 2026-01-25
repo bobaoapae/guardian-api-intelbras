@@ -431,21 +431,24 @@ class ISECNetClient:
         Returns:
             Tuple of (success, message)
         """
-        success, conn = await self._ensure_connected(
-            device_id, mac, password,
-            use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
-        )
-        if not success or not conn:
-            return False, "Not connected"
+        # Use per-device lock to prevent concurrent operations
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
 
-        try:
-            success, message = await conn.protocol.shock_on(zones)
-            return success, message
-        except Exception as e:
-            logger.error(f"Error turning shock on for device {device_id}: {e}")
-            async with self._lock:
-                await self._disconnect_device(device_id)
-            return False, str(e)
+            try:
+                success, message = await conn.protocol.shock_on(zones)
+                return success, message
+            except Exception as e:
+                logger.error(f"Error turning shock on for device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
 
     async def shock_off(
         self,
@@ -476,21 +479,24 @@ class ISECNetClient:
         Returns:
             Tuple of (success, message)
         """
-        success, conn = await self._ensure_connected(
-            device_id, mac, password,
-            use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
-        )
-        if not success or not conn:
-            return False, "Not connected"
+        # Use per-device lock to prevent concurrent operations
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
 
-        try:
-            success, message = await conn.protocol.shock_off(zones)
-            return success, message
-        except Exception as e:
-            logger.error(f"Error turning shock off for device {device_id}: {e}")
-            async with self._lock:
-                await self._disconnect_device(device_id)
-            return False, str(e)
+            try:
+                success, message = await conn.protocol.shock_off(zones)
+                return success, message
+            except Exception as e:
+                logger.error(f"Error turning shock off for device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
 
     async def eletrificador_alarm_on(
         self,
@@ -519,21 +525,24 @@ class ISECNetClient:
         Returns:
             Tuple of (success, message)
         """
-        success, conn = await self._ensure_connected(
-            device_id, mac, password,
-            use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
-        )
-        if not success or not conn:
-            return False, "Not connected"
+        # Use per-device lock to prevent concurrent operations
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
 
-        try:
-            success, message = await conn.protocol.eletrificador_alarm_on()
-            return success, message
-        except Exception as e:
-            logger.error(f"Error turning eletrificador alarm on for device {device_id}: {e}")
-            async with self._lock:
-                await self._disconnect_device(device_id)
-            return False, str(e)
+            try:
+                success, message = await conn.protocol.eletrificador_alarm_on()
+                return success, message
+            except Exception as e:
+                logger.error(f"Error turning eletrificador alarm on for device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
 
     async def eletrificador_alarm_off(
         self,
@@ -562,21 +571,24 @@ class ISECNetClient:
         Returns:
             Tuple of (success, message)
         """
-        success, conn = await self._ensure_connected(
-            device_id, mac, password,
-            use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
-        )
-        if not success or not conn:
-            return False, "Not connected"
+        # Use per-device lock to prevent concurrent operations
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
 
-        try:
-            success, message = await conn.protocol.eletrificador_alarm_off()
-            return success, message
-        except Exception as e:
-            logger.error(f"Error turning eletrificador alarm off for device {device_id}: {e}")
-            async with self._lock:
-                await self._disconnect_device(device_id)
-            return False, str(e)
+            try:
+                success, message = await conn.protocol.eletrificador_alarm_off()
+                return success, message
+            except Exception as e:
+                logger.error(f"Error turning eletrificador alarm off for device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
 
     def is_connected(self, device_id: int) -> bool:
         """Check if device is connected."""
