@@ -5,14 +5,9 @@ from typing import Any
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
     AlarmControlPanelEntityFeature,
+    AlarmControlPanelState,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import (
-    STATE_ALARM_ARMED_AWAY,
-    STATE_ALARM_ARMED_HOME,
-    STATE_ALARM_DISARMED,
-    STATE_ALARM_TRIGGERED,
-)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -103,11 +98,11 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
 
         # Check if triggered first (from device real-time status)
         if device and device.get("is_triggered"):
-            return STATE_ALARM_TRIGGERED
+            return AlarmControlPanelState.TRIGGERED
 
         # Check partition-level alarm state
         if partition.get("is_in_alarm", False):
-            return STATE_ALARM_TRIGGERED
+            return AlarmControlPanelState.TRIGGERED
 
         # Get status from partition or device arm_mode
         status = partition.get("status")
@@ -116,21 +111,28 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             status = device.get("arm_mode")
 
         if not status:
-            return STATE_ALARM_DISARMED
+            return AlarmControlPanelState.DISARMED
 
         # Map status to Home Assistant state
         ha_state = STATE_MAPPING.get(status)
         if ha_state:
-            return ha_state
+            # Convert string to AlarmControlPanelState enum
+            state_map = {
+                "armed_away": AlarmControlPanelState.ARMED_AWAY,
+                "armed_home": AlarmControlPanelState.ARMED_HOME,
+                "disarmed": AlarmControlPanelState.DISARMED,
+                "triggered": AlarmControlPanelState.TRIGGERED,
+            }
+            return state_map.get(ha_state, AlarmControlPanelState.DISARMED)
 
         # Fallback mapping
         status_upper = str(status).upper()
         if "AWAY" in status_upper or "ARMED" in status_upper:
-            return STATE_ALARM_ARMED_AWAY
+            return AlarmControlPanelState.ARMED_AWAY
         if "STAY" in status_upper or "HOME" in status_upper:
-            return STATE_ALARM_ARMED_HOME
+            return AlarmControlPanelState.ARMED_HOME
 
-        return STATE_ALARM_DISARMED
+        return AlarmControlPanelState.DISARMED
 
     @property
     def extra_state_attributes(self):
