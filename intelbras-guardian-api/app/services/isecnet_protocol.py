@@ -865,32 +865,43 @@ class ISECNetProtocol:
     async def _send_and_receive(
         self,
         data: bytes,
-        timeout: float = 10.0
+        timeout: float = 10.0,
+        retries: int = 0,
+        retry_delay: float = 1.0
     ) -> Optional[bytes]:
-        """Send data and receive response."""
+        """Send data and receive response with optional retry."""
         if not self.writer:
             logger.error("Not connected")
             return None
 
-        try:
-            logger.debug(f"Sending: {data.hex()}")
-            self.writer.write(data)
-            await self.writer.drain()
+        for attempt in range(retries + 1):
+            try:
+                if attempt > 0:
+                    logger.info(f"Retry attempt {attempt}/{retries} after {retry_delay}s delay")
+                    await asyncio.sleep(retry_delay)
 
-            # Read response (max 1024 bytes)
-            response = await asyncio.wait_for(
-                self.reader.read(1024),
-                timeout=timeout
-            )
-            logger.debug(f"Received: {response.hex() if response else 'empty'}")
-            return response
+                logger.debug(f"Sending: {data.hex()}")
+                self.writer.write(data)
+                await self.writer.drain()
 
-        except asyncio.TimeoutError:
-            logger.error("Timeout waiting for response")
-            return None
-        except Exception as e:
-            logger.error(f"Error sending/receiving: {e}")
-            return None
+                # Read response (max 1024 bytes)
+                response = await asyncio.wait_for(
+                    self.reader.read(1024),
+                    timeout=timeout
+                )
+                logger.debug(f"Received: {response.hex() if response else 'empty'}")
+                return response
+
+            except asyncio.TimeoutError:
+                logger.error(f"Timeout waiting for response (attempt {attempt + 1}/{retries + 1})")
+                if attempt < retries:
+                    continue
+                return None
+            except Exception as e:
+                logger.error(f"Error sending/receiving: {e}")
+                return None
+
+        return None
 
     def _parse_source_id(self, response: bytes) -> List[int]:
         """Parse source ID from response."""
@@ -1369,10 +1380,17 @@ class ISECNetProtocol:
 
                     logger.debug(f"Arming using ISECNet V1 (IP Receiver mode), mode={mode}, partition={effective_partition}, partitions_enabled={effective_partitions_enabled}")
                     cmd = self._build_isecv1_arm_cmd(self._password, effective_partition, stay)
-                    response = await self._send_and_receive(cmd)
+
+                    # ARM command behavior: Unlike DISARM, the panel may not respond immediately
+                    # due to exit delay or zone checking. Use a shorter timeout and treat
+                    # timeout as potential success (verify with status later).
+                    response = await self._send_and_receive(cmd, timeout=3.0)
 
                     if not response:
-                        return False, "No response"
+                        # No response to ARM is common - panel may be processing exit delay
+                        # This is NOT necessarily a failure - we'll verify with status check
+                        logger.info("No immediate response to ARM command (may be processing exit delay)")
+                        return True, f"Armed ({mode}) - command sent"
 
                     logger.debug(f"V1 Arm response: {response.hex()}")
                     success, message = self._parse_isecv1_command_response(response)
@@ -1383,10 +1401,12 @@ class ISECNetProtocol:
                         logger.info(f"Device doesn't have partitions enabled, retrying without partition byte")
                         self._partitions_enabled = False  # Update instance cache
                         cmd = self._build_isecv1_arm_cmd(self._password, None, stay)
-                        response = await self._send_and_receive(cmd)
+                        response = await self._send_and_receive(cmd, timeout=3.0)
 
                         if not response:
-                            return False, "No response on retry"
+                            # Same as above - no response may mean command is being processed
+                            logger.info("No immediate response to ARM retry (may be processing exit delay)")
+                            return True, f"Armed ({mode}) - command sent"
 
                         logger.debug(f"V1 Arm response (retry): {response.hex()}")
                         success, message = self._parse_isecv1_command_response(response)

@@ -1,4 +1,5 @@
 """Alarm control endpoints using ISECNet Protocol."""
+import asyncio
 import logging
 from dataclasses import dataclass
 from fastapi import APIRouter, HTTPException, Header
@@ -370,6 +371,76 @@ async def arm_partition(
             ip_receiver_account=conn_info.ip_receiver_account,
             partitions_enabled=cached_partitions_enabled
         )
+
+        # If command was sent but not confirmed (no response from panel),
+        # verify status to check if arm actually succeeded
+        if success and "command sent" in message:
+            logger.info("ARM command sent without confirmation, verifying with status check...")
+            # Small delay to allow panel to process the command
+            await asyncio.sleep(0.5)
+
+            # Check status to verify
+            verify_success, status, verify_msg = await isecnet_client.get_status(
+                device_id=device_id,
+                mac=conn_info.mac,
+                password=password,
+                use_ip_receiver=conn_info.use_ip_receiver,
+                ip_receiver_addr=conn_info.ip_receiver_addr,
+                ip_receiver_port=conn_info.ip_receiver_port,
+                ip_receiver_account=conn_info.ip_receiver_account
+            )
+
+            # Disconnect after status check
+            await isecnet_client.disconnect(device_id)
+
+            if verify_success:
+                expected_mode = "armed_away" if request.mode == ArmMode.AWAY else "armed_stay"
+                # Check if the panel is now armed (or arming)
+                if status.is_armed or status.arm_mode in ["armed_away", "armed_stay"]:
+                    logger.info(f"ARM verified: status shows {status.arm_mode}")
+                    success = True
+                    message = f"Armed ({request.mode.value})"
+                elif status.arm_mode == "disarmed":
+                    # Panel is still disarmed - ARM likely failed due to open zones
+                    # Check for open zones - we already have them from status
+                    open_zones_list = [z for z in status.zones if z.get("open", False)]
+                    if open_zones_list:
+                        logger.warning(f"ARM failed - panel still disarmed, {len(open_zones_list)} open zones detected")
+                        # Get friendly names for the zones we found
+                        friendly_names = await state_manager.get_all_zone_friendly_names(device_id)
+                        open_zones = [
+                            OpenZoneInfo(
+                                index=z["index"],
+                                name=f"Zona {z['index'] + 1:02d}",
+                                friendly_name=friendly_names.get(z["index"])
+                            )
+                            for z in open_zones_list
+                        ]
+                        # Return error response directly with open zones
+                        raise HTTPException(
+                            status_code=400,
+                            detail={
+                                "error": "OpenZonesError",
+                                "message": "Não é possível armar: existem zonas abertas",
+                                "open_zones": [
+                                    {
+                                        "index": z.index,
+                                        "name": z.name,
+                                        "friendly_name": z.friendly_name
+                                    }
+                                    for z in open_zones
+                                ]
+                            }
+                        )
+                    else:
+                        # No open zones but still disarmed - command may not have been received
+                        logger.warning("ARM failed - panel still disarmed, no open zones detected")
+                        success = False
+                        message = "Arm command not accepted by panel"
+            else:
+                # Could not verify - assume command was sent and let UI sync handle the rest
+                logger.warning(f"Could not verify ARM status: {verify_msg}")
+                # Keep success=True since command was sent
 
         if not success:
             # Check if this is an "Open zones" error - if so, fetch which zones are open
