@@ -1,6 +1,7 @@
 """Alarm control panel for Intelbras Guardian."""
+import asyncio
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
@@ -66,6 +67,10 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
         self._partition_id = partition_id
         self._device_mac = device_mac
 
+        # Optimistic state management
+        self._optimistic_state: Optional[AlarmControlPanelState] = None
+        self._pending_action: Optional[asyncio.Task] = None
+
         # Entity attributes
         self._attr_unique_id = f"{device_mac}_partition_{partition_id}"
 
@@ -93,6 +98,10 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
     @property
     def state(self) -> str:
         """Return the state of the alarm."""
+        # Use optimistic state if set (for immediate UI feedback)
+        if self._optimistic_state is not None:
+            return self._optimistic_state
+
         partition = self.coordinator.get_partition(self._device_id, self._partition_id)
         device = self.coordinator.get_device(self._device_id)
 
@@ -137,6 +146,11 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
 
         return AlarmControlPanelState.DISARMED
 
+    def _clear_optimistic_state(self) -> None:
+        """Clear optimistic state after sync."""
+        self._optimistic_state = None
+        self.async_write_ha_state()
+
     @property
     def extra_state_attributes(self):
         """Return extra state attributes."""
@@ -162,73 +176,150 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
         return attrs
 
     async def async_alarm_disarm(self, code: str = None) -> None:
-        """Send disarm command."""
+        """Send disarm command with optimistic update."""
         _LOGGER.info(f"Disarming partition {self._partition_id}")
-        result = await self.coordinator.client.disarm_partition(
-            self._device_id,
-            self._partition_id
-        )
 
-        # Always refresh to get current state
-        await self.coordinator.async_request_refresh()
+        # Optimistic update - UI responds immediately
+        self._optimistic_state = AlarmControlPanelState.DISARMED
+        self.async_write_ha_state()
 
-        if not result.get("success"):
-            error_msg = result.get("error", "Falha ao desarmar")
-            # Check if "No response" - command may have worked anyway
-            if "No response" in error_msg:
-                _LOGGER.warning(f"Disarm command sent but no response received - checking state")
-                # If state is now disarmed, command worked
-                if self.state == AlarmControlPanelState.DISARMED:
-                    _LOGGER.info("Disarm successful despite no response")
-                    return
-            _LOGGER.error(f"Failed to disarm partition: {error_msg}")
-            raise HomeAssistantError(f"Falha ao desarmar: {error_msg}")
+        # Execute command in background
+        async def _execute_disarm():
+            try:
+                result = await self.coordinator.client.disarm_partition(
+                    self._device_id,
+                    self._partition_id
+                )
+
+                if not result.get("success"):
+                    error_msg = result.get("error", "Falha ao desarmar")
+                    # Don't revert for "No response" - command likely worked
+                    if "No response" not in error_msg:
+                        _LOGGER.error(f"Failed to disarm partition: {error_msg}")
+                        # Revert optimistic state on error
+                        self._optimistic_state = None
+                        self.async_write_ha_state()
+                    else:
+                        _LOGGER.warning(f"Disarm command sent but no response received")
+            except Exception as e:
+                _LOGGER.error(f"Error disarming partition: {e}")
+                # Revert optimistic state on exception
+                self._optimistic_state = None
+                self.async_write_ha_state()
+            finally:
+                # Refresh to sync real state (will clear optimistic state if matches)
+                await self.coordinator.async_request_refresh()
+                # Clear optimistic state after refresh
+                self._optimistic_state = None
+
+        # Run in background
+        self.hass.async_create_task(_execute_disarm())
 
     async def async_alarm_arm_home(self, code: str = None) -> None:
-        """Send arm home (stay/partial) command."""
+        """Send arm home (stay/partial) command with optimistic update."""
         _LOGGER.info(f"Arming partition {self._partition_id} in home mode")
-        result = await self.coordinator.client.arm_partition(
-            self._device_id,
-            self._partition_id,
-            mode="home"
-        )
 
-        # Always refresh to get current state
-        await self.coordinator.async_request_refresh()
+        # Optimistic update - UI responds immediately
+        self._optimistic_state = AlarmControlPanelState.ARMING
+        self.async_write_ha_state()
 
-        if not result.get("success"):
-            error_msg = self._format_arm_error(result)
-            # Check if "No response" - command may have worked anyway
-            if "No response" in str(result.get("error", "")):
-                _LOGGER.warning(f"Arm home command sent but no response received - checking state")
-                if self.state == AlarmControlPanelState.ARMED_HOME:
-                    _LOGGER.info("Arm home successful despite no response")
-                    return
-            _LOGGER.error(f"Failed to arm partition in home mode: {error_msg}")
-            raise HomeAssistantError(error_msg)
+        # Execute command in background
+        async def _execute_arm_home():
+            try:
+                result = await self.coordinator.client.arm_partition(
+                    self._device_id,
+                    self._partition_id,
+                    mode="home"
+                )
+
+                if result.get("success"):
+                    # Update to armed state
+                    self._optimistic_state = AlarmControlPanelState.ARMED_HOME
+                    self.async_write_ha_state()
+                else:
+                    error_msg = self._format_arm_error(result)
+                    # Don't revert for "No response" - command likely worked
+                    if "No response" not in str(result.get("error", "")):
+                        _LOGGER.error(f"Failed to arm partition in home mode: {error_msg}")
+                        # Revert optimistic state on error
+                        self._optimistic_state = None
+                        self.async_write_ha_state()
+                        # Show error to user via persistent notification
+                        self.hass.components.persistent_notification.async_create(
+                            error_msg,
+                            title="Erro ao Armar Alarme",
+                            notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
+                        )
+                    else:
+                        _LOGGER.warning(f"Arm home command sent but no response received")
+                        self._optimistic_state = AlarmControlPanelState.ARMED_HOME
+                        self.async_write_ha_state()
+            except Exception as e:
+                _LOGGER.error(f"Error arming partition in home mode: {e}")
+                # Revert optimistic state on exception
+                self._optimistic_state = None
+                self.async_write_ha_state()
+            finally:
+                # Refresh to sync real state
+                await self.coordinator.async_request_refresh()
+                # Clear optimistic state after refresh
+                self._optimistic_state = None
+
+        # Run in background
+        self.hass.async_create_task(_execute_arm_home())
 
     async def async_alarm_arm_away(self, code: str = None) -> None:
-        """Send arm away (total) command."""
+        """Send arm away (total) command with optimistic update."""
         _LOGGER.info(f"Arming partition {self._partition_id} in away mode")
-        result = await self.coordinator.client.arm_partition(
-            self._device_id,
-            self._partition_id,
-            mode="away"
-        )
 
-        # Always refresh to get current state
-        await self.coordinator.async_request_refresh()
+        # Optimistic update - UI responds immediately
+        self._optimistic_state = AlarmControlPanelState.ARMING
+        self.async_write_ha_state()
 
-        if not result.get("success"):
-            error_msg = self._format_arm_error(result)
-            # Check if "No response" - command may have worked anyway
-            if "No response" in str(result.get("error", "")):
-                _LOGGER.warning(f"Arm away command sent but no response received - checking state")
-                if self.state == AlarmControlPanelState.ARMED_AWAY:
-                    _LOGGER.info("Arm away successful despite no response")
-                    return
-            _LOGGER.error(f"Failed to arm partition in away mode: {error_msg}")
-            raise HomeAssistantError(error_msg)
+        # Execute command in background
+        async def _execute_arm_away():
+            try:
+                result = await self.coordinator.client.arm_partition(
+                    self._device_id,
+                    self._partition_id,
+                    mode="away"
+                )
+
+                if result.get("success"):
+                    # Update to armed state
+                    self._optimistic_state = AlarmControlPanelState.ARMED_AWAY
+                    self.async_write_ha_state()
+                else:
+                    error_msg = self._format_arm_error(result)
+                    # Don't revert for "No response" - command likely worked
+                    if "No response" not in str(result.get("error", "")):
+                        _LOGGER.error(f"Failed to arm partition in away mode: {error_msg}")
+                        # Revert optimistic state on error
+                        self._optimistic_state = None
+                        self.async_write_ha_state()
+                        # Show error to user via persistent notification
+                        self.hass.components.persistent_notification.async_create(
+                            error_msg,
+                            title="Erro ao Armar Alarme",
+                            notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
+                        )
+                    else:
+                        _LOGGER.warning(f"Arm away command sent but no response received")
+                        self._optimistic_state = AlarmControlPanelState.ARMED_AWAY
+                        self.async_write_ha_state()
+            except Exception as e:
+                _LOGGER.error(f"Error arming partition in away mode: {e}")
+                # Revert optimistic state on exception
+                self._optimistic_state = None
+                self.async_write_ha_state()
+            finally:
+                # Refresh to sync real state
+                await self.coordinator.async_request_refresh()
+                # Clear optimistic state after refresh
+                self._optimistic_state = None
+
+        # Run in background
+        self.hass.async_create_task(_execute_arm_away())
 
     def _format_arm_error(self, result: dict) -> str:
         """Format error message for arming failure."""
