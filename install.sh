@@ -29,7 +29,7 @@ set -e
 # Variáveis Globais
 #-------------------------------------------------------------------------------
 
-VERSION="1.0.6"
+VERSION="1.0.7"
 GITHUB_REPO="https://github.com/bobaoapae/guardian-api-intelbras"
 GITHUB_ZIP="https://github.com/bobaoapae/guardian-api-intelbras/archive/refs/heads/main.zip"
 
@@ -191,10 +191,11 @@ ask_choice() {
         return
     fi
 
-    echo "$prompt"
+    # Usar >&2 para mostrar na tela (stderr) em vez de capturar
+    [ -n "$prompt" ] && echo "$prompt" >&2
     local i=1
     for opt in "${options[@]}"; do
-        echo "  $i) $opt"
+        echo "  $i) $opt" >&2
         ((i++))
     done
 
@@ -206,7 +207,7 @@ ask_choice() {
             echo "$choice"
             return
         fi
-        echo "Opção inválida. Digite um número entre 1 e ${#options[@]}."
+        echo "Opção inválida. Digite um número entre 1 e ${#options[@]}." >&2
     done
 }
 
