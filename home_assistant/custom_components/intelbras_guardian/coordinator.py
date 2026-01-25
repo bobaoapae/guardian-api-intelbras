@@ -164,10 +164,22 @@ class GuardianCoordinator(DataUpdateCoordinator):
                     _LOGGER.debug(f"Could not get zones for device {device_id}: {e}")
 
                 # Fallback: use zones from device data
-                for zone in device.get("zones", []):
-                    zone["device_id"] = device_id
-                    zone["device_mac"] = device.get("mac", "")
-                    all_zones.append(zone)
+                device_zones = device.get("zones", [])
+                if device_zones:
+                    # Try to calculate index from zone IDs (they are usually sequential)
+                    # e.g., IDs 21135370, 21135371, ... correspond to indices 0, 1, ...
+                    zone_ids = [z.get("id", 0) for z in device_zones if z.get("id")]
+                    min_zone_id = min(zone_ids) if zone_ids else 0
+
+                    for zone in device_zones:
+                        zone["device_id"] = device_id
+                        zone["device_mac"] = device.get("mac", "")
+                        # Calculate index from ID (ID - min_ID = index)
+                        if "index" not in zone and zone.get("id"):
+                            zone["index"] = zone.get("id") - min_zone_id
+                        elif "index" not in zone:
+                            zone["index"] = 0
+                        all_zones.append(zone)
 
             # Check for new events
             new_events = []
