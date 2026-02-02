@@ -23,6 +23,7 @@ class InMemoryStateManager:
     - Device state caching
     - Device password storage (per session)
     - Device connection info caching (for performance)
+    - Last known alarm state (persistent, no TTL) for connection failure fallback
     - Automatic cleanup of expired entries
     """
 
@@ -34,6 +35,7 @@ class InMemoryStateManager:
         self._device_conn_info: Dict[str, Dict[str, Any]] = {}  # device_id -> connection info cache
         self._device_partitions_enabled: Dict[str, bool] = {}  # device_id -> partitions_enabled (from status)
         self._zone_friendly_names: Dict[str, Dict[int, str]] = {}  # device_id -> {zone_index: friendly_name}
+        self._last_known_status: Dict[str, Dict[str, Any]] = {}  # device_id -> last successful status (persistent)
         self._state_ttl = 30  # Device state TTL in seconds
         self._conn_info_ttl = 300  # Connection info TTL in seconds (5 minutes)
         self._cleanup_task: Optional[asyncio.Task] = None
@@ -54,12 +56,15 @@ class InMemoryStateManager:
                     self._zone_friendly_names = {}
                     for device_id, zones in raw_zone_names.items():
                         self._zone_friendly_names[device_id] = {int(k): v for k, v in zones.items()}
-                    logger.info(f"Loaded {len(self._tokens)} sessions, {len(self._device_passwords)} password sets, {len(self._zone_friendly_names)} zone configs from file")
+                    # Load last known status (persistent cache for connection failures)
+                    self._last_known_status = data.get("last_known_status", {})
+                    logger.info(f"Loaded {len(self._tokens)} sessions, {len(self._device_passwords)} password sets, {len(self._zone_friendly_names)} zone configs, {len(self._last_known_status)} last known statuses from file")
         except Exception as e:
             logger.warning(f"Could not load sessions from file: {e}")
             self._tokens = {}
             self._device_passwords = {}
             self._zone_friendly_names = {}
+            self._last_known_status = {}
 
     def _save_sessions(self) -> None:
         """Save sessions to file."""
@@ -74,7 +79,8 @@ class InMemoryStateManager:
                 json.dump({
                     "tokens": self._tokens,
                     "device_passwords": self._device_passwords,
-                    "zone_friendly_names": zone_names_serializable
+                    "zone_friendly_names": zone_names_serializable,
+                    "last_known_status": self._last_known_status
                 }, f, indent=2)
             logger.debug(f"Saved {len(self._tokens)} sessions to file")
         except Exception as e:
@@ -514,6 +520,60 @@ class InMemoryStateManager:
                 del self._zone_friendly_names[key][zone_index]
                 self._save_sessions()
                 logger.debug(f"Deleted zone {zone_index} friendly_name for device {device_id}")
+
+    # Last known status management (persistent cache for connection failures)
+
+    async def set_last_known_status(self, device_id: int, status_data: Dict[str, Any]) -> None:
+        """
+        Store last known alarm status for a device.
+
+        This is persisted to disk and used as fallback when connection to
+        the alarm panel fails (e.g., AMT legacy app is blocking the connection).
+
+        Args:
+            device_id: Device identifier
+            status_data: Full status data from successful ISECNet status query
+        """
+        async with self._lock:
+            key = str(device_id)
+            status_copy = status_data.copy()
+            status_copy["_last_updated"] = datetime.utcnow().isoformat()
+            self._last_known_status[key] = status_copy
+            self._save_sessions()
+            logger.debug(f"Saved last known status for device {device_id}: arm_mode={status_data.get('arm_mode')}")
+
+    async def get_last_known_status(self, device_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Get last known alarm status for a device.
+
+        Used as fallback when real-time connection fails.
+
+        Args:
+            device_id: Device identifier
+
+        Returns:
+            Last known status dict with '_last_updated' timestamp, or None if not available
+        """
+        async with self._lock:
+            key = str(device_id)
+            status = self._last_known_status.get(key)
+            if status:
+                return status.copy()
+            return None
+
+    async def delete_last_known_status(self, device_id: int) -> None:
+        """
+        Delete last known status for a device.
+
+        Args:
+            device_id: Device identifier
+        """
+        async with self._lock:
+            key = str(device_id)
+            if key in self._last_known_status:
+                del self._last_known_status[key]
+                self._save_sessions()
+                logger.debug(f"Deleted last known status for device {device_id}")
 
 
 # Global state manager instance

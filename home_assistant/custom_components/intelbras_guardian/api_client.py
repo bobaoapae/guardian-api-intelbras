@@ -296,8 +296,12 @@ class GuardianApiClient:
                     # Handle error response - detail can be string or dict
                     detail = response_data.get("detail", {})
                     if isinstance(detail, dict):
+                        error_type = detail.get("error", "")
                         error_msg = detail.get("message", detail.get("error", "Erro desconhecido"))
                         open_zones = detail.get("open_zones", [])
+                        # Include error type in the message for better handling
+                        if error_type and error_type not in error_msg:
+                            error_msg = f"{error_type}: {error_msg}"
                     else:
                         error_msg = str(detail) if detail else "Erro desconhecido"
                         open_zones = []

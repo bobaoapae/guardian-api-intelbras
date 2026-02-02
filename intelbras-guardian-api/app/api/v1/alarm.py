@@ -95,6 +95,9 @@ class AlarmStatusResponse(BaseModel):
     shock_triggered: bool = Field(default=False, description="Whether shock/fence is triggered (eletrificador only)")
     alarm_enabled: bool = Field(default=False, description="Whether alarm is enabled (eletrificador only)")
     alarm_triggered: bool = Field(default=False, description="Whether alarm is triggered (eletrificador only)")
+    # Connection status fields (for handling connection failures)
+    connection_unavailable: bool = Field(default=False, description="True if using cached data due to connection failure")
+    last_updated: Optional[str] = Field(None, description="ISO timestamp of when status was last successfully fetched")
 
 
 class GetStatusRequest(BaseModel):
@@ -443,6 +446,20 @@ async def arm_partition(
                 # Keep success=True since command was sent
 
         if not success:
+            # Check if this is a connection error (central busy, offline, etc.)
+            connection_errors = ["busy", "offline", "timeout", "connection", "not connected", "connect"]
+            is_connection_error = any(err in message.lower() for err in connection_errors)
+
+            if is_connection_error:
+                # Connection blocked - likely AMT legacy app or network issue
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "ConnectionUnavailable",
+                        "message": f"Conexao com a central indisponivel: {message}. Verifique se o app AMT nao esta aberto.",
+                    }
+                )
+
             # Check if this is an "Open zones" error - if so, fetch which zones are open
             if "Open zones" in message or "open zones" in message.lower():
                 open_zones = await _get_open_zones(
@@ -562,6 +579,20 @@ async def disarm_partition(
         )
 
         if not success:
+            # Check if this is a connection error (central busy, offline, etc.)
+            connection_errors = ["busy", "offline", "timeout", "connection", "not connected", "connect"]
+            is_connection_error = any(err in message.lower() for err in connection_errors)
+
+            if is_connection_error:
+                # Connection blocked - likely AMT legacy app or network issue
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "ConnectionUnavailable",
+                        "message": f"Conexao com a central indisponivel: {message}. Verifique se o app AMT nao esta aberto.",
+                    }
+                )
+
             raise AlarmOperationError(f"Failed to disarm: {message}")
 
         # Clear device cache to force refresh
@@ -575,6 +606,9 @@ async def disarm_partition(
             message="Disarmed successfully"
         )
 
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is
+        raise
     except InvalidSessionError as e:
         raise HTTPException(status_code=401, detail=str(e.message))
     except AlarmOperationError as e:
@@ -686,6 +720,10 @@ async def get_alarm_status_auto(
     This is the auto-sync endpoint that uses a previously saved password.
     Returns real-time partition status directly from the alarm panel.
 
+    If the connection to the alarm panel fails (e.g., AMT legacy app is blocking
+    the connection), this endpoint will return the last known status with
+    `connection_unavailable: true` flag.
+
     NOTE: This endpoint disconnects after getting status to allow
     sequential syncing of multiple devices without conflicts.
 
@@ -722,19 +760,64 @@ async def get_alarm_status_auto(
             ip_receiver_account=conn_info.ip_receiver_account
         )
 
-        # Cache partitions_enabled for arm/disarm commands
-        # This is crucial because after disconnect, the protocol instance is destroyed
-        # and we need this info to know whether to include partition byte in commands
-        if success:
-            await state_manager.set_device_partitions_enabled(device_id, status.partitions_enabled)
-            logger.debug(f"Cached partitions_enabled={status.partitions_enabled} for device {device_id}")
-
         # Disconnect after getting status to free connection for other devices
         # This is important when syncing multiple devices sequentially
         await isecnet_client.disconnect(device_id)
 
+        # If connection failed, try to return last known status
         if not success:
-            raise APIConnectionError(f"Failed to get status: {message}")
+            logger.warning(f"Failed to get real-time status for device {device_id}: {message}")
+
+            # Try to get last known status from persistent cache
+            last_known = await state_manager.get_last_known_status(device_id)
+            if last_known:
+                logger.info(f"Returning last known status for device {device_id} (from {last_known.get('_last_updated')})")
+
+                # Convert cached data to response format
+                partitions = [
+                    PartitionStatusInfo(index=p["index"], state=p["state"])
+                    for p in last_known.get("partitions", [])
+                ]
+                zones = [
+                    ZoneStatusInfo(
+                        index=z["index"],
+                        name=z.get("name", f"Zona {z['index'] + 1:02d}"),
+                        is_open=z.get("is_open", False),
+                        is_bypassed=z.get("is_bypassed", False)
+                    )
+                    for z in last_known.get("zones", [])
+                ]
+
+                return AlarmStatusResponse(
+                    device_id=device_id,
+                    model=last_known.get("model"),
+                    mac=last_known.get("mac"),
+                    is_armed=last_known.get("is_armed", False),
+                    arm_mode=last_known.get("arm_mode", "disarmed"),
+                    is_triggered=last_known.get("is_triggered", False),
+                    partitions=partitions,
+                    partitions_enabled=last_known.get("partitions_enabled", False),
+                    zones=zones,
+                    message=f"Conexao indisponivel - usando ultimo estado conhecido. Erro: {message}",
+                    # Eletrificador-specific fields
+                    is_eletrificador=last_known.get("is_eletrificador", False),
+                    shock_enabled=last_known.get("shock_enabled", False),
+                    shock_triggered=last_known.get("shock_triggered", False),
+                    alarm_enabled=last_known.get("alarm_enabled", False),
+                    alarm_triggered=last_known.get("alarm_triggered", False),
+                    # Connection status
+                    connection_unavailable=True,
+                    last_updated=last_known.get("_last_updated")
+                )
+            else:
+                # No cached status available - raise error
+                raise APIConnectionError(f"Failed to get status: {message}")
+
+        # Cache partitions_enabled for arm/disarm commands
+        # This is crucial because after disconnect, the protocol instance is destroyed
+        # and we need this info to know whether to include partition byte in commands
+        await state_manager.set_device_partitions_enabled(device_id, status.partitions_enabled)
+        logger.debug(f"Cached partitions_enabled={status.partitions_enabled} for device {device_id}")
 
         # Convert partitions to response format
         partitions = [
@@ -753,6 +836,25 @@ async def get_alarm_status_auto(
             for z in status.zones
         ]
 
+        # Save last known status for future connection failures
+        from datetime import datetime
+        last_known_data = {
+            "model": status.model,
+            "mac": conn_info.mac,
+            "is_armed": status.is_armed,
+            "arm_mode": status.arm_mode,
+            "is_triggered": status.is_triggered,
+            "partitions": [{"index": p.index, "state": p.state} for p in partitions],
+            "partitions_enabled": status.partitions_enabled,
+            "zones": [{"index": z.index, "name": z.name, "is_open": z.is_open, "is_bypassed": z.is_bypassed} for z in zones],
+            "is_eletrificador": status.is_eletrificador,
+            "shock_enabled": status.shock_enabled,
+            "shock_triggered": status.shock_triggered,
+            "alarm_enabled": status.alarm_enabled,
+            "alarm_triggered": status.alarm_triggered,
+        }
+        await state_manager.set_last_known_status(device_id, last_known_data)
+
         return AlarmStatusResponse(
             device_id=device_id,
             model=status.model,
@@ -769,7 +871,10 @@ async def get_alarm_status_auto(
             shock_enabled=status.shock_enabled,
             shock_triggered=status.shock_triggered,
             alarm_enabled=status.alarm_enabled,
-            alarm_triggered=status.alarm_triggered
+            alarm_triggered=status.alarm_triggered,
+            # Connection status
+            connection_unavailable=False,
+            last_updated=datetime.utcnow().isoformat()
         )
 
     except InvalidSessionError as e:

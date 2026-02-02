@@ -156,6 +156,17 @@ class GuardianCoordinator(DataUpdateCoordinator):
                             processed_devices[device_id]["is_armed"] = status.get("is_armed")
                             processed_devices[device_id]["is_triggered"] = status.get("is_triggered")
 
+                            # Track connection unavailability (e.g., AMT legacy app blocking)
+                            connection_unavailable = status.get("connection_unavailable", False)
+                            processed_devices[device_id]["connection_unavailable"] = connection_unavailable
+                            processed_devices[device_id]["last_updated"] = status.get("last_updated")
+
+                            if connection_unavailable:
+                                _LOGGER.warning(
+                                    f"Device {device_id} connection unavailable - using last known state. "
+                                    f"Message: {status.get('message')}"
+                                )
+
                             # Eletrificador-specific fields
                             if is_eletrificador:
                                 processed_devices[device_id]["shock_enabled"] = status.get("shock_enabled")

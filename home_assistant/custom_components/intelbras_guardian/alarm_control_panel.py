@@ -172,6 +172,9 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             attrs["is_triggered"] = device.get("is_triggered", False)
             attrs["has_saved_password"] = device.get("has_saved_password", False)
             attrs["partitions_enabled"] = device.get("partitions_enabled")
+            # Connection status (for detecting AMT legacy app blocking)
+            attrs["connection_unavailable"] = device.get("connection_unavailable", False)
+            attrs["last_updated"] = device.get("last_updated")
 
         return attrs
 
@@ -192,13 +195,19 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                 )
 
                 if not result.get("success"):
-                    error_msg = result.get("error", "Falha ao desarmar")
+                    error_msg = self._format_disarm_error(result)
                     # Don't revert for "No response" - command likely worked
-                    if "No response" not in error_msg:
+                    if "No response" not in str(result.get("error", "")):
                         _LOGGER.error(f"Failed to disarm partition: {error_msg}")
                         # Revert optimistic state on error
                         self._optimistic_state = None
                         self.async_write_ha_state()
+                        # Show error to user via persistent notification
+                        self.hass.components.persistent_notification.async_create(
+                            error_msg,
+                            title="Erro ao Desarmar Alarme",
+                            notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
+                        )
                     else:
                         _LOGGER.warning(f"Disarm command sent but no response received")
             except Exception as e:
@@ -206,6 +215,12 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                 # Revert optimistic state on exception
                 self._optimistic_state = None
                 self.async_write_ha_state()
+                # Show error notification
+                self.hass.components.persistent_notification.async_create(
+                    f"Erro ao desarmar: {str(e)}",
+                    title="Erro ao Desarmar Alarme",
+                    notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
+                )
             finally:
                 # Refresh to sync real state (will clear optimistic state if matches)
                 await self.coordinator.async_request_refresh()
@@ -259,6 +274,12 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                 # Revert optimistic state on exception
                 self._optimistic_state = None
                 self.async_write_ha_state()
+                # Show error notification
+                self.hass.components.persistent_notification.async_create(
+                    f"Erro ao armar (home): {str(e)}",
+                    title="Erro ao Armar Alarme",
+                    notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
+                )
             finally:
                 # Refresh to sync real state
                 await self.coordinator.async_request_refresh()
@@ -312,6 +333,12 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                 # Revert optimistic state on exception
                 self._optimistic_state = None
                 self.async_write_ha_state()
+                # Show error notification
+                self.hass.components.persistent_notification.async_create(
+                    f"Erro ao armar (away): {str(e)}",
+                    title="Erro ao Armar Alarme",
+                    notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
+                )
             finally:
                 # Refresh to sync real state
                 await self.coordinator.async_request_refresh()
@@ -326,14 +353,37 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
         error = result.get("error", "Falha ao armar")
         open_zones = result.get("open_zones", [])
 
+        # Check for connection unavailable error
+        if "ConnectionUnavailable" in error or "indisponivel" in error.lower():
+            return (
+                "Conexao com a central indisponivel.\n\n"
+                "Verifique se o aplicativo AMT nao esta aberto.\n"
+                "A central so permite uma conexao por vez."
+            )
+
         if open_zones:
             zone_names = []
             for zone in open_zones:
                 if isinstance(zone, dict):
-                    name = zone.get("friendly_name") or zone.get("name") or f"Zona {zone.get('index', '?')}"
+                    name = zone.get("friendly_name") or zone.get("name") or f"Zona {zone.get('index', '?') + 1}"
                 else:
                     name = str(zone)
                 zone_names.append(name)
-            return f"Não foi possível armar: zonas abertas - {', '.join(zone_names)}"
+            zones_list = "\n".join(f"  - {z}" for z in zone_names)
+            return f"Nao foi possivel armar: zonas abertas\n\n{zones_list}"
 
         return f"Falha ao armar: {error}"
+
+    def _format_disarm_error(self, result: dict) -> str:
+        """Format error message for disarming failure."""
+        error = result.get("error", "Falha ao desarmar")
+
+        # Check for connection unavailable error
+        if "ConnectionUnavailable" in error or "indisponivel" in error.lower():
+            return (
+                "Conexao com a central indisponivel.\n\n"
+                "Verifique se o aplicativo AMT nao esta aberto.\n"
+                "A central so permite uma conexao por vez."
+            )
+
+        return f"Falha ao desarmar: {error}"
