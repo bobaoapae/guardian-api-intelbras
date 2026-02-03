@@ -453,17 +453,23 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         coordinator: GuardianCoordinator,
         device_id: int,
         device_mac: str,
-        home_partitions: list[int],
-        away_partitions: list[int],
+        home_partitions: list,
+        away_partitions: list,
         partitions: list[dict],
     ):
         """Initialize the unified alarm control panel."""
         super().__init__(coordinator)
         self._device_id = device_id
         self._device_mac = device_mac
-        self._home_partitions = home_partitions  # Partition indices to arm in Home mode
-        self._away_partitions = away_partitions  # Partition indices to arm in Away mode
+        # Ensure partition indices are integers (may come as strings from config)
+        self._home_partitions = [int(p) for p in home_partitions]
+        self._away_partitions = [int(p) for p in away_partitions]
         self._partitions = partitions  # List of partition dicts
+
+        _LOGGER.info(
+            f"Unified alarm initialized: home_partitions={self._home_partitions}, "
+            f"away_partitions={self._away_partitions}"
+        )
 
         # Optimistic state management
         self._optimistic_state: Optional[AlarmControlPanelState] = None
@@ -497,11 +503,11 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         states = {}
         partitions = self.coordinator.data.get("partitions", []) if self.coordinator.data else []
 
-        for idx, partition in enumerate(
-            p for p in partitions if p.get("device_id") == self._device_id
-        ):
+        device_partitions = [p for p in partitions if p.get("device_id") == self._device_id]
+        for idx, partition in enumerate(device_partitions):
             status = partition.get("status", "disarmed")
             states[idx] = status
+            _LOGGER.debug(f"Partition {idx} status: {status}")
 
         return states
 
