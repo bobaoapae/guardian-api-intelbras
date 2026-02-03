@@ -38,15 +38,19 @@ async def async_setup_entry(
     if coordinator.data:
         # Get unified alarm config from options
         unified_config = entry.options.get(CONF_UNIFIED_ALARM, {})
+        _LOGGER.debug(f"Entry options: {entry.options}")
+        _LOGGER.debug(f"Unified config: {unified_config}")
 
         # Track which devices have unified alarm enabled
         unified_devices = set()
 
         # Create unified alarm entities for configured devices
         for device_id_str, device_config in unified_config.items():
+            _LOGGER.debug(f"Processing unified config for device {device_id_str}: {device_config}")
             if device_config.get("enabled", True):
                 device_id = int(device_id_str)
                 device = coordinator.get_device(device_id)
+                _LOGGER.debug(f"Device {device_id} found: {device is not None}")
                 if device:
                     unified_devices.add(device_id)
                     # Get partitions for this device
@@ -54,6 +58,7 @@ async def async_setup_entry(
                         p for p in coordinator.data.get("partitions", [])
                         if p.get("device_id") == device_id
                     ]
+                    _LOGGER.debug(f"Device {device_id} has {len(device_partitions)} partitions")
                     if len(device_partitions) > 1:
                         entities.append(
                             GuardianUnifiedAlarmControlPanel(
@@ -70,6 +75,8 @@ async def async_setup_entry(
                             f"(home={device_config.get(CONF_HOME_PARTITIONS)}, "
                             f"away={device_config.get(CONF_AWAY_PARTITIONS)})"
                         )
+                    else:
+                        _LOGGER.warning(f"Device {device_id} has only {len(device_partitions)} partitions, skipping unified alarm")
 
         # Create individual partition entities
         for partition in coordinator.data.get("partitions", []):
