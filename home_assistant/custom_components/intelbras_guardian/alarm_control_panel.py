@@ -516,6 +516,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         """Return the state of the unified alarm."""
         # Use optimistic state if set
         if self._optimistic_state is not None:
+            _LOGGER.info(f"Unified alarm using optimistic state: {self._optimistic_state}")
             return self._optimistic_state
 
         device = self.coordinator.get_device(self._device_id)
@@ -526,45 +527,48 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         # Get partition states
         partition_states = self._get_partition_states()
+        _LOGGER.info(f"Unified alarm partition_states: {partition_states}")
 
         if not partition_states:
+            _LOGGER.info("Unified alarm: no partition states, returning DISARMED")
             return AlarmControlPanelState.DISARMED
 
         # Check which partitions are armed
         armed_partitions = set()
         for idx, status in partition_states.items():
-            if status and "armed" in status.lower():
+            if status and "armed" in str(status).lower():
                 armed_partitions.add(idx)
+
+        _LOGGER.info(f"Unified alarm armed_partitions: {armed_partitions}")
+
+        # No partitions armed = DISARMED
+        if not armed_partitions:
+            _LOGGER.info("Unified alarm: no armed partitions, returning DISARMED")
+            return AlarmControlPanelState.DISARMED
 
         # Determine unified state based on configuration
         away_set = set(self._away_partitions)
         home_set = set(self._home_partitions)
-
-        # Partitions that are ONLY in away (not in home)
         away_only = away_set - home_set
 
-        _LOGGER.debug(
-            f"Unified state check: armed={armed_partitions}, home={home_set}, "
-            f"away={away_set}, away_only={away_only}"
+        _LOGGER.info(
+            f"Unified alarm config: home_set={home_set}, away_set={away_set}, away_only={away_only}"
         )
 
-        # ARMED_AWAY: All away partitions are armed (including home + away-only)
-        if away_set and away_set == armed_partitions:
-            return AlarmControlPanelState.ARMED_AWAY
-
-        # ARMED_AWAY: All away partitions armed (superset is ok if extra partitions armed)
+        # ARMED_AWAY: All away partitions are armed
         if away_set and away_set.issubset(armed_partitions):
+            _LOGGER.info("Unified alarm: all away partitions armed, returning ARMED_AWAY")
             return AlarmControlPanelState.ARMED_AWAY
 
-        # ARMED_HOME: Only home partitions are armed (away-only partitions are NOT armed)
-        if home_set and home_set.issubset(armed_partitions) and not (away_only & armed_partitions):
-            return AlarmControlPanelState.ARMED_HOME
+        # ARMED_HOME: Home partitions armed, but away-only partitions NOT armed
+        if home_set and home_set.issubset(armed_partitions):
+            if not (away_only & armed_partitions):
+                _LOGGER.info("Unified alarm: home partitions armed (away-only not armed), returning ARMED_HOME")
+                return AlarmControlPanelState.ARMED_HOME
 
-        # Some partitions armed but doesn't match home or away pattern
-        if armed_partitions:
-            return AlarmControlPanelState.ARMED_HOME
-
-        return AlarmControlPanelState.DISARMED
+        # Some partitions armed but doesn't match patterns
+        _LOGGER.info("Unified alarm: partial arm state, returning ARMED_HOME")
+        return AlarmControlPanelState.ARMED_HOME
 
     @property
     def extra_state_attributes(self):
