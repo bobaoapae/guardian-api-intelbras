@@ -98,10 +98,9 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
     _attr_has_entity_name = True
     _attr_code_arm_required = False
     _attr_code_format = None
-    _attr_supported_features = (
-        AlarmControlPanelEntityFeature.ARM_HOME |
-        AlarmControlPanelEntityFeature.ARM_AWAY
-    )
+    # Individual partitions only support ARM_AWAY (simple arm/disarm)
+    # Use the unified alarm entity for HOME/AWAY modes
+    _attr_supported_features = AlarmControlPanelEntityFeature.ARM_AWAY
 
     def __init__(
         self,
@@ -535,15 +534,27 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         away_set = set(self._away_partitions)
         home_set = set(self._home_partitions)
 
-        # All away partitions armed = ARMED_AWAY
+        # Partitions that are ONLY in away (not in home)
+        away_only = away_set - home_set
+
+        _LOGGER.debug(
+            f"Unified state check: armed={armed_partitions}, home={home_set}, "
+            f"away={away_set}, away_only={away_only}"
+        )
+
+        # ARMED_AWAY: All away partitions are armed (including home + away-only)
+        if away_set and away_set == armed_partitions:
+            return AlarmControlPanelState.ARMED_AWAY
+
+        # ARMED_AWAY: All away partitions armed (superset is ok if extra partitions armed)
         if away_set and away_set.issubset(armed_partitions):
             return AlarmControlPanelState.ARMED_AWAY
 
-        # Home partitions armed (but not all away) = ARMED_HOME
-        if home_set and home_set.issubset(armed_partitions):
+        # ARMED_HOME: Only home partitions are armed (away-only partitions are NOT armed)
+        if home_set and home_set.issubset(armed_partitions) and not (away_only & armed_partitions):
             return AlarmControlPanelState.ARMED_HOME
 
-        # Some partitions armed = ARMED_HOME (partial)
+        # Some partitions armed but doesn't match home or away pattern
         if armed_partitions:
             return AlarmControlPanelState.ARMED_HOME
 
