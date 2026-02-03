@@ -516,7 +516,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         """Return the state of the unified alarm."""
         # Use optimistic state if set
         if self._optimistic_state is not None:
-            _LOGGER.info(f"Unified alarm using optimistic state: {self._optimistic_state}")
+            _LOGGER.debug(f"Unified alarm using optimistic state: {self._optimistic_state}")
             return self._optimistic_state
 
         device = self.coordinator.get_device(self._device_id)
@@ -527,23 +527,26 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         # Get partition states
         partition_states = self._get_partition_states()
-        _LOGGER.info(f"Unified alarm partition_states: {partition_states}")
+        _LOGGER.debug(f"Unified alarm partition_states: {partition_states}")
 
         if not partition_states:
-            _LOGGER.info("Unified alarm: no partition states, returning DISARMED")
+            _LOGGER.debug("Unified alarm: no partition states, returning DISARMED")
             return AlarmControlPanelState.DISARMED
 
         # Check which partitions are armed
+        # Note: Can't use "armed" in status because "disarmed" contains "armed"!
         armed_partitions = set()
+        armed_states = {"armed_away", "armed_stay", "armed_home", "armed"}
         for idx, status in partition_states.items():
-            if status and "armed" in str(status).lower():
+            status_lower = str(status).lower() if status else ""
+            if status_lower in armed_states:
                 armed_partitions.add(idx)
 
-        _LOGGER.info(f"Unified alarm armed_partitions: {armed_partitions}")
+        _LOGGER.debug(f"Unified alarm armed_partitions: {armed_partitions}")
 
         # No partitions armed = DISARMED
         if not armed_partitions:
-            _LOGGER.info("Unified alarm: no armed partitions, returning DISARMED")
+            _LOGGER.debug("Unified alarm: no armed partitions, returning DISARMED")
             return AlarmControlPanelState.DISARMED
 
         # Determine unified state based on configuration
@@ -551,23 +554,23 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         home_set = set(self._home_partitions)
         away_only = away_set - home_set
 
-        _LOGGER.info(
+        _LOGGER.debug(
             f"Unified alarm config: home_set={home_set}, away_set={away_set}, away_only={away_only}"
         )
 
         # ARMED_AWAY: All away partitions are armed
         if away_set and away_set.issubset(armed_partitions):
-            _LOGGER.info("Unified alarm: all away partitions armed, returning ARMED_AWAY")
+            _LOGGER.debug("Unified alarm: all away partitions armed, returning ARMED_AWAY")
             return AlarmControlPanelState.ARMED_AWAY
 
         # ARMED_HOME: Home partitions armed, but away-only partitions NOT armed
         if home_set and home_set.issubset(armed_partitions):
             if not (away_only & armed_partitions):
-                _LOGGER.info("Unified alarm: home partitions armed (away-only not armed), returning ARMED_HOME")
+                _LOGGER.debug("Unified alarm: home partitions armed (away-only not armed), returning ARMED_HOME")
                 return AlarmControlPanelState.ARMED_HOME
 
         # Some partitions armed but doesn't match patterns
-        _LOGGER.info("Unified alarm: partial arm state, returning ARMED_HOME")
+        _LOGGER.debug("Unified alarm: partial arm state, returning ARMED_HOME")
         return AlarmControlPanelState.ARMED_HOME
 
     @property
