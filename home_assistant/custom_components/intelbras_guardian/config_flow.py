@@ -273,22 +273,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     "mac": self._device_mac,
                 }
 
-                # Update options
+                # Build new options (merge with existing)
                 new_options = dict(current_options)
                 new_options[CONF_UNIFIED_ALARM] = new_unified_config
 
-                # Trigger entity reload
-                self.hass.config_entries.async_update_entry(
-                    self._entry,
-                    options=new_options,
-                )
-
-                # Request coordinator refresh
-                coordinator = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
-                if coordinator:
-                    await coordinator.async_request_refresh()
-
-                return self.async_create_entry(title="", data={})
+                # Return with data - this is what gets saved to entry.options
+                # The update listener will reload the integration
+                return self.async_create_entry(title="", data=new_options)
 
         # Check if unified is currently enabled
         current_enabled = device_config.get("enabled", True)
