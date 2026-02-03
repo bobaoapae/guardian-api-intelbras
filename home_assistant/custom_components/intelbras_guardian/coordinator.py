@@ -179,11 +179,18 @@ class GuardianCoordinator(DataUpdateCoordinator):
                                 processed_devices[device_id]["partitions_enabled"] = status.get("partitions_enabled")
 
                             # Update partition statuses from real-time data
+                            # Note: ISECNet returns partitions with 'index' (0, 1, 2...)
+                            # while cloud API returns partitions with large 'id' values
+                            # We match by position in the list (index)
                             if status.get("partitions"):
+                                device_partitions_list = device.get("partitions", [])
                                 for rt_partition in status.get("partitions", []):
-                                    for partition in device.get("partitions", []):
-                                        if partition.get("id") == rt_partition.get("index"):
-                                            partition["status"] = rt_partition.get("state")
+                                    rt_index = rt_partition.get("index", 0)
+                                    if rt_index < len(device_partitions_list):
+                                        device_partitions_list[rt_index]["status"] = rt_partition.get("state")
+                                        _LOGGER.debug(
+                                            f"Updated partition {rt_index} status to {rt_partition.get('state')}"
+                                        )
 
                             # Get zones from status (avoids separate ISECNet call)
                             if status.get("zones"):
