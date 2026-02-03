@@ -34,9 +34,26 @@
         "title": "Opcoes do Intelbras Guardian",
         "description": "Selecione uma opcao para configurar.",
         "menu_options": {
+          "configure_unified_alarm": "Configurar Alarme Unificado",
           "configure_device_password": "Configurar Senha do Dispositivo",
           "manage_zones": "Gerenciar Nomes das Zonas",
           "reauth": "Re-autenticar (se a sessao expirou)"
+        }
+      },
+      "configure_unified_alarm": {
+        "title": "Configurar Alarme Unificado",
+        "description": "Selecione um dispositivo com multiplas particoes para configurar o alarme unificado.\n\nO alarme unificado permite controlar multiplas particoes com os modos 'Em Casa' e 'Ausente'.",
+        "data": {
+          "device": "Dispositivo"
+        }
+      },
+      "select_partitions": {
+        "title": "Configurar Particoes",
+        "description": "Configure quais particoes serao armadas em cada modo.\n\n**Em Casa**: Arma apenas as particoes selecionadas (ex: sensores perimetrais)\n**Ausente**: Arma todas as particoes selecionadas (ex: saindo de casa)",
+        "data": {
+          "enable_unified": "Habilitar alarme unificado",
+          "home_partitions": "Particoes para modo 'Em Casa'",
+          "away_partitions": "Particoes para modo 'Ausente'"
         }
       },
       "reauth": {
@@ -71,11 +88,13 @@
       "delete_failed": "Falha ao remover senha.",
       "password_required": "A senha e obrigatoria.",
       "oauth_callback_failed": "Autenticacao falhou. Certifique-se de copiar a URL completa de callback.",
-      "callback_url_required": "Por favor, cole a URL de callback."
+      "callback_url_required": "Por favor, cole a URL de callback.",
+      "select_at_least_one": "Selecione pelo menos uma particao."
     },
     "abort": {
       "not_loaded": "Integracao nao carregada. Tente novamente.",
-      "no_devices": "Nenhum dispositivo encontrado."
+      "no_devices": "Nenhum dispositivo encontrado.",
+      "no_multi_partition_devices": "Nenhum dispositivo com multiplas particoes encontrado."
     }
   }
 }

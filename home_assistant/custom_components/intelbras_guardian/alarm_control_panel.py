@@ -1,7 +1,7 @@
 """Alarm control panel for Intelbras Guardian."""
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelEntity,
@@ -14,7 +14,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, STATE_MAPPING
+from .const import (
+    CONF_AWAY_PARTITIONS,
+    CONF_HOME_PARTITIONS,
+    CONF_UNIFIED_ALARM,
+    DOMAIN,
+    STATE_MAPPING,
+)
 from .coordinator import GuardianCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,6 +36,42 @@ async def async_setup_entry(
 
     entities = []
     if coordinator.data:
+        # Get unified alarm config from options
+        unified_config = entry.options.get(CONF_UNIFIED_ALARM, {})
+
+        # Track which devices have unified alarm enabled
+        unified_devices = set()
+
+        # Create unified alarm entities for configured devices
+        for device_id_str, device_config in unified_config.items():
+            if device_config.get("enabled", True):
+                device_id = int(device_id_str)
+                device = coordinator.get_device(device_id)
+                if device:
+                    unified_devices.add(device_id)
+                    # Get partitions for this device
+                    device_partitions = [
+                        p for p in coordinator.data.get("partitions", [])
+                        if p.get("device_id") == device_id
+                    ]
+                    if len(device_partitions) > 1:
+                        entities.append(
+                            GuardianUnifiedAlarmControlPanel(
+                                coordinator,
+                                device_id,
+                                device_config.get("mac", device.get("mac", "")),
+                                device_config.get(CONF_HOME_PARTITIONS, [0]),
+                                device_config.get(CONF_AWAY_PARTITIONS, list(range(len(device_partitions)))),
+                                device_partitions,
+                            )
+                        )
+                        _LOGGER.info(
+                            f"Created unified alarm for device {device_id} "
+                            f"(home={device_config.get(CONF_HOME_PARTITIONS)}, "
+                            f"away={device_config.get(CONF_AWAY_PARTITIONS)})"
+                        )
+
+        # Create individual partition entities
         for partition in coordinator.data.get("partitions", []):
             entities.append(
                 GuardianAlarmControlPanel(
@@ -387,3 +429,341 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             )
 
         return f"Falha ao desarmar: {error}"
+
+
+class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
+    """Unified alarm control panel that controls multiple partitions."""
+
+    _attr_has_entity_name = True
+    _attr_code_arm_required = False
+    _attr_code_format = None
+    _attr_supported_features = (
+        AlarmControlPanelEntityFeature.ARM_HOME |
+        AlarmControlPanelEntityFeature.ARM_AWAY
+    )
+
+    def __init__(
+        self,
+        coordinator: GuardianCoordinator,
+        device_id: int,
+        device_mac: str,
+        home_partitions: list[int],
+        away_partitions: list[int],
+        partitions: list[dict],
+    ):
+        """Initialize the unified alarm control panel."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._device_mac = device_mac
+        self._home_partitions = home_partitions  # Partition indices to arm in Home mode
+        self._away_partitions = away_partitions  # Partition indices to arm in Away mode
+        self._partitions = partitions  # List of partition dicts
+
+        # Optimistic state management
+        self._optimistic_state: Optional[AlarmControlPanelState] = None
+
+        # Entity attributes
+        self._attr_unique_id = f"{device_mac}_unified_alarm"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the alarm."""
+        device = self.coordinator.get_device(self._device_id)
+        if device:
+            return device.get("description", "Alarme")
+        return "Alarme"
+
+    @property
+    def device_info(self):
+        """Return device info."""
+        device = self.coordinator.get_device(self._device_id)
+        if device:
+            return {
+                "identifiers": {(DOMAIN, self._device_mac)},
+                "name": device.get("description", f"Intelbras Alarm {self._device_id}"),
+                "manufacturer": "Intelbras",
+                "model": device.get("model", "Guardian Alarm"),
+            }
+        return None
+
+    def _get_partition_states(self) -> dict[int, str]:
+        """Get current state of each partition by index."""
+        states = {}
+        partitions = self.coordinator.data.get("partitions", []) if self.coordinator.data else []
+
+        for idx, partition in enumerate(
+            p for p in partitions if p.get("device_id") == self._device_id
+        ):
+            status = partition.get("status", "disarmed")
+            states[idx] = status
+
+        return states
+
+    @property
+    def state(self) -> str:
+        """Return the state of the unified alarm."""
+        # Use optimistic state if set
+        if self._optimistic_state is not None:
+            return self._optimistic_state
+
+        device = self.coordinator.get_device(self._device_id)
+
+        # Check if triggered
+        if device and device.get("is_triggered"):
+            return AlarmControlPanelState.TRIGGERED
+
+        # Get partition states
+        partition_states = self._get_partition_states()
+
+        if not partition_states:
+            return AlarmControlPanelState.DISARMED
+
+        # Check which partitions are armed
+        armed_partitions = set()
+        for idx, status in partition_states.items():
+            if status and "armed" in status.lower():
+                armed_partitions.add(idx)
+
+        # Determine unified state based on configuration
+        away_set = set(self._away_partitions)
+        home_set = set(self._home_partitions)
+
+        # All away partitions armed = ARMED_AWAY
+        if away_set and away_set.issubset(armed_partitions):
+            return AlarmControlPanelState.ARMED_AWAY
+
+        # Home partitions armed (but not all away) = ARMED_HOME
+        if home_set and home_set.issubset(armed_partitions):
+            return AlarmControlPanelState.ARMED_HOME
+
+        # Some partitions armed = ARMED_HOME (partial)
+        if armed_partitions:
+            return AlarmControlPanelState.ARMED_HOME
+
+        return AlarmControlPanelState.DISARMED
+
+    @property
+    def extra_state_attributes(self):
+        """Return extra state attributes."""
+        device = self.coordinator.get_device(self._device_id)
+        partition_states = self._get_partition_states()
+
+        # Build partition status list
+        partition_status = []
+        for idx, state in partition_states.items():
+            partition = next(
+                (p for p in self._partitions if self._partitions.index(p) == idx),
+                None
+            )
+            name = partition.get("name", f"Particao {idx + 1}") if partition else f"Particao {idx + 1}"
+            partition_status.append({
+                "index": idx,
+                "name": name,
+                "status": state,
+                "in_home_mode": idx in self._home_partitions,
+                "in_away_mode": idx in self._away_partitions,
+            })
+
+        attrs = {
+            "device_id": self._device_id,
+            "unified_mode": True,
+            "home_partitions": self._home_partitions,
+            "away_partitions": self._away_partitions,
+            "partition_status": partition_status,
+        }
+
+        if device:
+            attrs["connection_unavailable"] = device.get("connection_unavailable", False)
+            attrs["last_updated"] = device.get("last_updated")
+
+        return attrs
+
+    async def async_alarm_disarm(self, code: str = None) -> None:
+        """Disarm all partitions."""
+        _LOGGER.info(f"Unified alarm: Disarming all partitions for device {self._device_id}")
+
+        self._optimistic_state = AlarmControlPanelState.DISARMED
+        self.async_write_ha_state()
+
+        async def _execute_disarm():
+            all_success = True
+            errors = []
+
+            # Disarm all partitions (use away_partitions as it's the superset)
+            partitions_to_disarm = set(self._away_partitions) | set(self._home_partitions)
+
+            for idx in partitions_to_disarm:
+                if idx < len(self._partitions):
+                    partition_id = self._partitions[idx].get("id")
+                    try:
+                        result = await self.coordinator.client.disarm_partition(
+                            self._device_id,
+                            partition_id
+                        )
+                        if not result.get("success"):
+                            if "No response" not in str(result.get("error", "")):
+                                all_success = False
+                                errors.append(f"Particao {idx + 1}: {result.get('error')}")
+                    except Exception as e:
+                        all_success = False
+                        errors.append(f"Particao {idx + 1}: {str(e)}")
+
+            if not all_success:
+                self._optimistic_state = None
+                self.async_write_ha_state()
+                error_msg = "Falha ao desarmar:\n" + "\n".join(errors)
+                self.hass.components.persistent_notification.async_create(
+                    error_msg,
+                    title="Erro ao Desarmar Alarme",
+                    notification_id=f"alarm_error_{self._device_id}_unified"
+                )
+
+            await self.coordinator.async_request_refresh()
+            self._optimistic_state = None
+
+        self.hass.async_create_task(_execute_disarm())
+
+    async def async_alarm_arm_home(self, code: str = None) -> None:
+        """Arm home partitions only."""
+        _LOGGER.info(
+            f"Unified alarm: Arming HOME partitions {self._home_partitions} for device {self._device_id}"
+        )
+
+        self._optimistic_state = AlarmControlPanelState.ARMING
+        self.async_write_ha_state()
+
+        async def _execute_arm_home():
+            all_success = True
+            errors = []
+            open_zones_all = []
+
+            # First disarm partitions not in home mode (if they're armed)
+            partition_states = self._get_partition_states()
+            for idx, status in partition_states.items():
+                if idx not in self._home_partitions and status and "armed" in status.lower():
+                    if idx < len(self._partitions):
+                        partition_id = self._partitions[idx].get("id")
+                        try:
+                            await self.coordinator.client.disarm_partition(
+                                self._device_id, partition_id
+                            )
+                        except Exception:
+                            pass  # Best effort
+
+            # Arm home partitions
+            for idx in self._home_partitions:
+                if idx < len(self._partitions):
+                    partition_id = self._partitions[idx].get("id")
+                    try:
+                        result = await self.coordinator.client.arm_partition(
+                            self._device_id,
+                            partition_id,
+                            mode="away"  # Use "away" mode for the partition itself
+                        )
+                        if not result.get("success"):
+                            if "No response" not in str(result.get("error", "")):
+                                all_success = False
+                                errors.append(f"Particao {idx + 1}: {result.get('error')}")
+                                if result.get("open_zones"):
+                                    open_zones_all.extend(result.get("open_zones"))
+                    except Exception as e:
+                        all_success = False
+                        errors.append(f"Particao {idx + 1}: {str(e)}")
+
+            if all_success:
+                self._optimistic_state = AlarmControlPanelState.ARMED_HOME
+                self.async_write_ha_state()
+            else:
+                self._optimistic_state = None
+                self.async_write_ha_state()
+
+                if open_zones_all:
+                    zone_names = []
+                    for zone in open_zones_all:
+                        if isinstance(zone, dict):
+                            name = zone.get("friendly_name") or zone.get("name") or f"Zona {zone.get('index', '?') + 1}"
+                        else:
+                            name = str(zone)
+                        if name not in zone_names:
+                            zone_names.append(name)
+                    zones_list = "\n".join(f"  - {z}" for z in zone_names)
+                    error_msg = f"Nao foi possivel armar: zonas abertas\n\n{zones_list}"
+                else:
+                    error_msg = "Falha ao armar (Em Casa):\n" + "\n".join(errors)
+
+                self.hass.components.persistent_notification.async_create(
+                    error_msg,
+                    title="Erro ao Armar Alarme",
+                    notification_id=f"alarm_error_{self._device_id}_unified"
+                )
+
+            await self.coordinator.async_request_refresh()
+            self._optimistic_state = None
+
+        self.hass.async_create_task(_execute_arm_home())
+
+    async def async_alarm_arm_away(self, code: str = None) -> None:
+        """Arm all away partitions."""
+        _LOGGER.info(
+            f"Unified alarm: Arming AWAY partitions {self._away_partitions} for device {self._device_id}"
+        )
+
+        self._optimistic_state = AlarmControlPanelState.ARMING
+        self.async_write_ha_state()
+
+        async def _execute_arm_away():
+            all_success = True
+            errors = []
+            open_zones_all = []
+
+            # Arm away partitions
+            for idx in self._away_partitions:
+                if idx < len(self._partitions):
+                    partition_id = self._partitions[idx].get("id")
+                    try:
+                        result = await self.coordinator.client.arm_partition(
+                            self._device_id,
+                            partition_id,
+                            mode="away"
+                        )
+                        if not result.get("success"):
+                            if "No response" not in str(result.get("error", "")):
+                                all_success = False
+                                errors.append(f"Particao {idx + 1}: {result.get('error')}")
+                                if result.get("open_zones"):
+                                    open_zones_all.extend(result.get("open_zones"))
+                    except Exception as e:
+                        all_success = False
+                        errors.append(f"Particao {idx + 1}: {str(e)}")
+
+            if all_success:
+                self._optimistic_state = AlarmControlPanelState.ARMED_AWAY
+                self.async_write_ha_state()
+            else:
+                self._optimistic_state = None
+                self.async_write_ha_state()
+
+                if open_zones_all:
+                    zone_names = []
+                    for zone in open_zones_all:
+                        if isinstance(zone, dict):
+                            name = zone.get("friendly_name") or zone.get("name") or f"Zona {zone.get('index', '?') + 1}"
+                        else:
+                            name = str(zone)
+                        if name not in zone_names:
+                            zone_names.append(name)
+                    zones_list = "\n".join(f"  - {z}" for z in zone_names)
+                    error_msg = f"Nao foi possivel armar: zonas abertas\n\n{zones_list}"
+                else:
+                    error_msg = "Falha ao armar (Ausente):\n" + "\n".join(errors)
+
+                self.hass.components.persistent_notification.async_create(
+                    error_msg,
+                    title="Erro ao Armar Alarme",
+                    notification_id=f"alarm_error_{self._device_id}_unified"
+                )
+
+            await self.coordinator.async_request_refresh()
+            self._optimistic_state = None
+
+        self.hass.async_create_task(_execute_arm_away())

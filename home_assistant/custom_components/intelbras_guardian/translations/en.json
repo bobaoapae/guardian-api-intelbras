@@ -1,0 +1,100 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Intelbras Guardian - API Connection",
+        "description": "Enter the FastAPI middleware address to connect.",
+        "data": {
+          "fastapi_host": "FastAPI Host (IP or hostname)",
+          "fastapi_port": "FastAPI Port"
+        }
+      },
+      "oauth": {
+        "title": "Intelbras Guardian - Login",
+        "description": "To complete authentication:\n\n1. Open the link below in your browser:\n\n**{auth_url}**\n\n2. Login with your Intelbras account\n\n3. After login, you will be redirected to a page with a URL containing `code=` and `state=`\n\n4. Copy the **complete URL** from the browser address bar and paste below\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "Callback URL (paste the complete URL after login)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to FastAPI middleware. Check host and port.",
+      "oauth_start_failed": "Failed to start OAuth flow. Check FastAPI logs.",
+      "oauth_callback_failed": "Authentication failed. Make sure to copy the complete callback URL.",
+      "callback_url_required": "Please paste the callback URL.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This API instance is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Intelbras Guardian Options",
+        "description": "Select an option to configure.",
+        "menu_options": {
+          "configure_unified_alarm": "Configure Unified Alarm",
+          "configure_device_password": "Configure Device Password",
+          "manage_zones": "Manage Zone Names",
+          "reauth": "Re-authenticate (if session expired)"
+        }
+      },
+      "configure_unified_alarm": {
+        "title": "Configure Unified Alarm",
+        "description": "Select a device with multiple partitions to configure the unified alarm.\n\nThe unified alarm allows you to control multiple partitions with 'Home' and 'Away' modes.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "select_partitions": {
+        "title": "Configure Partitions",
+        "description": "Configure which partitions will be armed in each mode.\n\n**Home**: Arms only selected partitions (e.g., perimeter sensors)\n**Away**: Arms all selected partitions (e.g., leaving home)",
+        "data": {
+          "enable_unified": "Enable unified alarm",
+          "home_partitions": "Partitions for 'Home' mode",
+          "away_partitions": "Partitions for 'Away' mode"
+        }
+      },
+      "reauth": {
+        "title": "Intelbras Guardian - Re-authenticate",
+        "description": "Your session may have expired. To re-authenticate:\n\n1. Open the link below in your browser:\n\n**{auth_url}**\n\n2. Login with your Intelbras account\n\n3. After login, copy the **complete URL** from the browser address bar and paste below\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "Callback URL (paste the complete URL after login)"
+        }
+      },
+      "configure_device_password": {
+        "title": "Select Device",
+        "description": "Select a device to configure the ISECNet protocol communication password.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "enter_password": {
+        "title": "Device Password",
+        "description": "Enter the password for device: {device_name}\n\nThis is the password programmed in the alarm panel (not your Intelbras account password).",
+        "data": {
+          "action": "Action",
+          "device_password": "Device Password"
+        }
+      },
+      "manage_zones": {
+        "title": "Manage Zone Names",
+        "description": "Zone friendly names can be configured via the FastAPI Web UI.\n\nAccess: {webui_url}\n\nLogin with your Intelbras credentials, select the device and click 'Zones' to manage names."
+      }
+    },
+    "error": {
+      "save_failed": "Failed to save password. Check FastAPI logs.",
+      "delete_failed": "Failed to remove password.",
+      "password_required": "Password is required.",
+      "oauth_callback_failed": "Authentication failed. Make sure to copy the complete callback URL.",
+      "callback_url_required": "Please paste the callback URL.",
+      "select_at_least_one": "Select at least one partition."
+    },
+    "abort": {
+      "not_loaded": "Integration not loaded. Try again.",
+      "no_devices": "No devices found.",
+      "no_multi_partition_devices": "No devices with multiple partitions found."
+    }
+  }
+}

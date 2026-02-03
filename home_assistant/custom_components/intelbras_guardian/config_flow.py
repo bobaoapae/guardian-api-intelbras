@@ -8,13 +8,17 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_client import GuardianApiClient
 from .const import (
+    CONF_AWAY_PARTITIONS,
     CONF_FASTAPI_HOST,
     CONF_FASTAPI_PORT,
+    CONF_HOME_PARTITIONS,
     CONF_SESSION_ID,
+    CONF_UNIFIED_ALARM,
     DEFAULT_FASTAPI_PORT,
     DOMAIN,
 )
@@ -167,7 +171,152 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         """Manage the options - show menu."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["configure_device_password", "manage_zones", "reauth"],
+            menu_options=["configure_unified_alarm", "configure_device_password", "manage_zones", "reauth"],
+        )
+
+    async def async_step_configure_unified_alarm(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Configure unified alarm entity for multi-partition devices."""
+        errors: Dict[str, str] = {}
+
+        # Get coordinator from hass.data
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+        if not coordinator:
+            return self.async_abort(reason="not_loaded")
+
+        # Find devices with multiple partitions
+        multi_partition_devices = []
+        if coordinator.data:
+            for device_id, device in coordinator.data.get("devices", {}).items():
+                partitions = [
+                    p for p in coordinator.data.get("partitions", [])
+                    if p.get("device_id") == device_id
+                ]
+                if len(partitions) > 1:
+                    multi_partition_devices.append({
+                        "id": device_id,
+                        "name": device.get("description", f"Dispositivo {device_id}"),
+                        "mac": device.get("mac", ""),
+                        "partitions": partitions,
+                    })
+
+        if not multi_partition_devices:
+            return self.async_abort(reason="no_multi_partition_devices")
+
+        if user_input is not None:
+            self._selected_device_id = int(user_input["device"])
+            # Find the device
+            for dev in multi_partition_devices:
+                if dev["id"] == self._selected_device_id:
+                    self._device_partitions = dev["partitions"]
+                    self._device_mac = dev["mac"]
+                    break
+            return await self.async_step_select_partitions()
+
+        # Build device selection
+        device_options = {str(d["id"]): d["name"] for d in multi_partition_devices}
+
+        return self.async_show_form(
+            step_id="configure_unified_alarm",
+            data_schema=vol.Schema({
+                vol.Required("device"): vol.In(device_options),
+            }),
+            errors=errors,
+        )
+
+    async def async_step_select_partitions(
+        self,
+        user_input: Optional[Dict[str, Any]] = None
+    ) -> FlowResult:
+        """Select which partitions to arm for each mode."""
+        errors: Dict[str, str] = {}
+
+        # Get current options
+        current_options = self._entry.options or {}
+        device_key = str(self._selected_device_id)
+
+        # Get current settings for this device
+        unified_config = current_options.get(CONF_UNIFIED_ALARM, {})
+        device_config = unified_config.get(device_key, {})
+        current_home = device_config.get(CONF_HOME_PARTITIONS, [0])  # Default: first partition
+        current_away = device_config.get(CONF_AWAY_PARTITIONS, None)  # Default: all
+
+        # Build partition options (use index in list)
+        partition_options = {}
+        for idx, p in enumerate(self._device_partitions):
+            name = p.get("name", f"Particao {idx + 1}")
+            partition_options[str(idx)] = name
+
+        # Default away to all partitions if not set
+        if current_away is None:
+            current_away = list(range(len(self._device_partitions)))
+
+        if user_input is not None:
+            # Parse selected partitions
+            home_partitions = [int(i) for i in user_input.get("home_partitions", [])]
+            away_partitions = [int(i) for i in user_input.get("away_partitions", [])]
+            enable_unified = user_input.get("enable_unified", True)
+
+            if not home_partitions:
+                errors["home_partitions"] = "select_at_least_one"
+            elif not away_partitions:
+                errors["away_partitions"] = "select_at_least_one"
+            else:
+                # Save configuration
+                new_unified_config = dict(unified_config)
+                new_unified_config[device_key] = {
+                    "enabled": enable_unified,
+                    CONF_HOME_PARTITIONS: home_partitions,
+                    CONF_AWAY_PARTITIONS: away_partitions,
+                    "mac": self._device_mac,
+                }
+
+                # Update options
+                new_options = dict(current_options)
+                new_options[CONF_UNIFIED_ALARM] = new_unified_config
+
+                # Trigger entity reload
+                self.hass.config_entries.async_update_entry(
+                    self._entry,
+                    options=new_options,
+                )
+
+                # Request coordinator refresh
+                coordinator = self.hass.data.get(DOMAIN, {}).get(self._entry.entry_id)
+                if coordinator:
+                    await coordinator.async_request_refresh()
+
+                return self.async_create_entry(title="", data={})
+
+        # Check if unified is currently enabled
+        current_enabled = device_config.get("enabled", True)
+
+        return self.async_show_form(
+            step_id="select_partitions",
+            data_schema=vol.Schema({
+                vol.Required("enable_unified", default=current_enabled): bool,
+                vol.Required(
+                    "home_partitions",
+                    default=[str(i) for i in current_home]
+                ): vol.All(
+                    cv.multi_select(partition_options),
+                ),
+                vol.Required(
+                    "away_partitions",
+                    default=[str(i) for i in current_away]
+                ): vol.All(
+                    cv.multi_select(partition_options),
+                ),
+            }),
+            errors=errors,
+            description_placeholders={
+                "device_name": next(
+                    (d["name"] for d in self._devices if d.get("id") == self._selected_device_id),
+                    f"Dispositivo {self._selected_device_id}"
+                ) if hasattr(self, "_devices") and self._devices else f"Dispositivo {self._selected_device_id}"
+            },
         )
 
     async def async_step_reauth(

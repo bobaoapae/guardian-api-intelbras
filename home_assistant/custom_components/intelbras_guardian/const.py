@@ -71,3 +71,8 @@ PLATFORMS = ["alarm_control_panel", "binary_sensor", "sensor", "switch"]
 
 # Events
 EVENT_ALARM = f"{DOMAIN}_alarm_event"
+
+# Unified alarm configuration
+CONF_UNIFIED_ALARM = "unified_alarm"  # Enable unified alarm entity
+CONF_HOME_PARTITIONS = "home_partitions"  # Partition indices to arm in "Home" mode
+CONF_AWAY_PARTITIONS = "away_partitions"  # Partition indices to arm in "Away" mode
