@@ -192,42 +192,44 @@ class GuardianCoordinator(DataUpdateCoordinator):
                         _LOGGER.debug(f"Could not get real-time status for device {device_id}: {e}")
 
                 # Extract partitions (only for non-eletrificadores)
-                # Only add multiple partitions if partitions_enabled is explicitly True
-                # This avoids creating "ghost" entities that become unavailable later
+                # Trust the partitions returned by the API, unless partitions_enabled is explicitly False
                 if not is_eletrificador:
                     partitions_enabled = processed_devices[device_id].get("partitions_enabled")
                     device_partitions = device.get("partitions", [])
 
-                    if partitions_enabled is True and len(device_partitions) > 1:
-                        # Partitions explicitly enabled - add all partitions
+                    # Show multiple partitions if:
+                    # - partitions_enabled is True (confirmed by ISECNet), OR
+                    # - partitions_enabled is None (unknown) AND API returned multiple partitions
+                    # Only collapse to single partition if partitions_enabled is explicitly False
+                    if partitions_enabled is not False and len(device_partitions) > 1:
+                        # Multiple partitions - add all
                         for partition in device_partitions:
                             partition_copy = partition.copy()
                             partition_copy["device_id"] = device_id
                             partition_copy["device_mac"] = device.get("mac", "")
                             partition_copy["device_model"] = device.get("model", "")
                             all_partitions.append(partition_copy)
-                    else:
-                        # Partitions disabled or unknown - only use first partition
-                        # This is the safest default to avoid orphan entities
-                        if device_partitions:
-                            partition = device_partitions[0].copy()
-                            partition["device_id"] = device_id
-                            partition["device_mac"] = device.get("mac", "")
-                            partition["device_model"] = device.get("model", "")
+                    elif device_partitions:
+                        # Single partition or partitions explicitly disabled
+                        partition = device_partitions[0].copy()
+                        partition["device_id"] = device_id
+                        partition["device_mac"] = device.get("mac", "")
+                        partition["device_model"] = device.get("model", "")
+                        if partitions_enabled is False or len(device_partitions) == 1:
                             partition["name"] = device.get("description", "Alarme")
-                            # Use device-level arm_mode
-                            partition["status"] = processed_devices[device_id].get("arm_mode")
-                            all_partitions.append(partition)
-                        else:
-                            # Create a virtual partition
-                            all_partitions.append({
-                                "id": 0,
-                                "device_id": device_id,
-                                "device_mac": device.get("mac", ""),
-                                "device_model": device.get("model", ""),
-                                "name": device.get("description", "Alarme"),
-                                "status": processed_devices[device_id].get("arm_mode"),
-                            })
+                        # Use device-level arm_mode
+                        partition["status"] = processed_devices[device_id].get("arm_mode")
+                        all_partitions.append(partition)
+                    else:
+                        # Create a virtual partition
+                        all_partitions.append({
+                            "id": 0,
+                            "device_id": device_id,
+                            "device_mac": device.get("mac", ""),
+                            "device_model": device.get("model", ""),
+                            "name": device.get("description", "Alarme"),
+                            "status": processed_devices[device_id].get("arm_mode"),
+                        })
 
                 # Get zones - prefer from status (already fetched), avoids extra ISECNet call
                 if status_zones:
