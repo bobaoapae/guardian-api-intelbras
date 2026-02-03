@@ -179,12 +179,28 @@ class ISECNetClient:
                     ip_receiver_port=ip_receiver_port
                 )
             else:
-                logger.info(f"Connecting to device {device_id} via Cloud (MAC: {clean_mac})")
+                # Try V2 first (port 9009)
+                logger.info(f"Connecting to device {device_id} via Cloud V2 (MAC: {clean_mac})")
                 success, message = await protocol.connect(
                     mac=clean_mac,
                     password=password,
-                    device_id=str(device_id)
+                    device_id=str(device_id),
+                    force_v1=False
                 )
+
+                # If V2 fails with "Not connected", try V1 as fallback (port 9015)
+                if not success and "Not connected" in message:
+                    logger.info(f"V2 failed with 'Not connected', trying V1 fallback for device {device_id}")
+                    await protocol.disconnect()
+                    protocol = ISECNetProtocol()  # Create new protocol instance
+                    success, message = await protocol.connect(
+                        mac=clean_mac,
+                        password=password,
+                        device_id=str(device_id),
+                        force_v1=True
+                    )
+                    if success:
+                        message = f"{message} (V1 fallback)"
 
             if success:
                 self._connections[device_id] = DeviceConnection(

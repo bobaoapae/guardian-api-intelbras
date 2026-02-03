@@ -66,14 +66,14 @@ class ISECNetV1Command(IntEnum):
 
 
 class ISECNetServerCommand(IntEnum):
-    """Server protocol commands."""
-    # Cloud commands
-    GET_BYTE = 0x0B
-    CONNECT = 0x21
-    TOKEN = 0x25
-    # IP Receiver commands (from APK CtrlType.java)
-    IP_RECEIVER_GET_BYTE = 0xE0  # SDK_CTRL_RAID = 224
-    IP_RECEIVER_CONNECT = 0xE4   # SDK_CTRL_ARMED = 228
+    """Server protocol commands (from APK CtrlType.java)."""
+    # V1 Cloud commands
+    GET_BYTE = 251         # 0xFB = SDK_CTRL_STOP_PLAYAUDIO
+    CONNECT = 229          # 0xE5 = SDK_CTRL_IP_MODIFY
+    TOKEN = 230            # 0xE6 = SDK_CTRL_WIFI_BY_WPS
+    # IP Receiver commands
+    IP_RECEIVER_GET_BYTE = 224  # 0xE0 = SDK_CTRL_RAID
+    IP_RECEIVER_CONNECT = 228   # 0xE4 = SDK_CTRL_ARMED
 
 
 class AppConnectionResponse(IntEnum):
@@ -118,12 +118,28 @@ class AlarmStatus:
             self.zones = []
 
 
-class ISECNetProtocol:
-    """ISECNet V2 Protocol handler."""
+class ConnectionType(IntEnum):
+    """Connection type for V1 protocol."""
+    ETHERNET = 69  # 0x45
+    SIM01 = 71     # 0x47
 
-    # Cloud relay server
-    AMT_SERVER = "amt8000.intelbras.com.br"
-    AMT_PORTS = [9009, 80]
+
+class ServerType(IntEnum):
+    """Server type for V1 protocol."""
+    ANDROID = 2
+    GUARDIAN = 5
+
+
+class ISECNetProtocol:
+    """ISECNet V2 Protocol handler with V1 fallback support."""
+
+    # Cloud relay servers (from APK BuildConfig.java)
+    # V2: amt8000.intelbras.com.br (for AMT_8000, AMT_9000, Eletrificadores)
+    # V1: amt.intelbras.com.br (for all other models like AMT_2018_E_SMART)
+    AMT_SERVER_V2 = "amt8000.intelbras.com.br"
+    AMT_SERVER_V1 = "amt.intelbras.com.br"
+    AMT_PORTS_V2 = [9009, 80]  # V2 ports
+    AMT_PORT_V1 = 9015         # V1 port
     TIMEOUT = 10  # seconds
 
     def __init__(self):
@@ -135,6 +151,7 @@ class ISECNetProtocol:
         self._lock = asyncio.Lock()
         self._password: Optional[str] = None  # Stored for ISECNet V1 commands
         self._is_ip_receiver: bool = False  # True if using IP Receiver (ISECNet V1)
+        self._is_v1: bool = False  # True if using V1 protocol (port 9015)
         self._partitions_enabled: Optional[bool] = None  # True if device has partitions enabled (from status)
 
     @staticmethod
@@ -212,7 +229,7 @@ class ISECNetProtocol:
 
         return bytes(packet)
 
-    def _build_server_connection_cmd(self, is_ip_receiver: bool = False) -> bytes:
+    def _build_server_connection_cmd(self, is_ip_receiver: bool = False, use_v1: bool = False) -> bytes:
         """Build server connection command."""
         if is_ip_receiver:
             # IP Receiver: [0x02, 0xE0 (IP_RECEIVER_GET_BYTE), 0x01, checksum]
@@ -221,9 +238,71 @@ class ISECNetProtocol:
             packet.append(self._checksum(packet))  # XOR ^ 0xFF checksum
             logger.debug(f"IP Receiver GET_BYTE: packet={bytes(packet).hex()}")
             return bytes(packet)
+        elif use_v1:
+            # V1 Cloud: [0x01, GET_BYTE(251=0xFB), checksum]
+            packet = [0x01, ISECNetServerCommand.GET_BYTE]
+            packet.append(self._checksum(packet))
+            logger.debug(f"V1 Cloud GET_BYTE: packet={bytes(packet).hex()}")
+            return bytes(packet)
         else:
-            # Cloud connection uses standard packet format
+            # V2 Cloud connection uses standard packet format
             return self._build_packet(Command.CONNECT, [0], [0, 0])
+
+    def _build_v1_connection_cmd(
+        self,
+        client_id: str,
+        mac: str,
+        byte_value: int,
+        connection_type: ConnectionType = ConnectionType.ETHERNET
+    ) -> bytes:
+        """Build V1 protocol connection command.
+
+        V1 uses client_id + MAC in hex format, encrypted with byte_value.
+        Format: [18, 0x21, 5(GUARDIAN), client_id_hex(8), mac_hex(6), 0, connection_type, checksum]
+        Then encrypted with XOR byte_value.
+
+        The client_id is the connecting device's identifier (like Android device ID),
+        NOT the alarm's cloud ID. It identifies the client to the relay server.
+        The MAC identifies which alarm panel to connect to.
+
+        Args:
+            client_id: Client identifier (hex string, will be padded to 16 chars = 8 bytes)
+            mac: Alarm panel MAC address
+            byte_value: XOR encryption byte from GET_BYTE response
+            connection_type: ETHERNET or SIM01
+        """
+        # Convert client_id to 8 hex bytes (padded with leading zeros)
+        # APK uses Android device ID which is 16 hex chars (8 bytes)
+        client_id_hex = client_id.upper().zfill(16)  # Pad to 16 hex chars = 8 bytes
+        client_id_bytes = [int(client_id_hex[i:i+2], 16) for i in range(0, 16, 2)]
+
+        # Convert MAC to 6 hex bytes
+        mac_clean = mac.replace(":", "").replace("-", "").upper()
+        mac_bytes = [int(mac_clean[i:i+2], 16) for i in range(0, 12, 2)]
+
+        packet = [
+            18,  # Length of payload (cmd + type + clientId + MAC + 0 + connType)
+            ISECNetServerCommand.CONNECT,  # 229 (0xE5) = SDK_CTRL_IP_MODIFY
+            ServerType.GUARDIAN,  # 5
+        ]
+        packet.extend(client_id_bytes)  # 8 bytes
+        packet.extend(mac_bytes)  # 6 bytes
+        packet.append(0)
+        packet.append(connection_type)  # ETHERNET=69 or SIM01=71
+
+        # Add checksum (XOR ^ 0xFF of all bytes)
+        checksum = self._checksum(packet)
+        packet.append(checksum)
+
+        logger.info(f"V1 CONNECT packet (before XOR): {[hex(b) for b in packet]}")
+        logger.info(f"V1 CONNECT checksum: {checksum} (0x{checksum:02X}), byte_value: {byte_value} (0x{byte_value:02X})")
+
+        # Encrypt with byte_value (XOR each byte)
+        encrypted = [b ^ byte_value for b in packet]
+
+        logger.debug(f"V1 Cloud CONNECT: client_id={client_id_hex}, mac={mac}, type={connection_type}")
+        logger.debug(f"V1 CONNECT packet (after XOR): {bytes(encrypted).hex()}")
+        return bytes(encrypted)
 
     def _build_app_connection_cmd(
         self,
@@ -671,42 +750,36 @@ class ISECNetProtocol:
         partition_enabled = data[21]
         status.partitions_enabled = bool(partition_enabled)
         self._partitions_enabled = bool(partition_enabled)  # Cache for arm/disarm commands
-        logger.debug(f"Partition enabled: {partition_enabled}")
+        logger.info(f"Partition enabled byte: {partition_enabled} (partitions_enabled={status.partitions_enabled})")
 
         # Partition armed status bits at data[22] (APK bytes[23])
-        # Each bit represents a partition: bit 0 = partition A, bit 1 = partition B, etc.
+        # APK parsePartitions: Each bit represents one partition's armed state
+        # bit 0 = partition A armed, bit 1 = partition B armed, etc.
+        # NOTE: STAY/AWAY mode info is in bytes[94] which only exists in COMPLETE status (96 bytes)
+        # For PARTIAL status (46 bytes), we only know if armed or not, not the mode.
         partition_status_byte = data[22]
-        logger.debug(f"Partition status byte: 0x{partition_status_byte:02X} (binary: {bin(partition_status_byte)})")
+        logger.info(f"Partition status byte: 0x{partition_status_byte:02X} (binary: {bin(partition_status_byte)})")
 
-        # Parse partitions
+        # Parse partitions - one bit per partition
         partitions = []
         num_partitions = self._get_max_partitions_for_model(model_code)
 
-        # APK parsePartitions: converts byte to boolean list where each bit = partition status
-        # For most models, bits 0-1 from first byte, bits 0-1 from second byte (if 2-byte status)
-        # Bit interpretation (from APK analysis):
-        #   - Even bit (0,2,4...) = partition armed
-        #   - Odd bit (1,3,5...) = armed in TOTAL mode (all zones)
-        # So: armed=1, total=0 → armed_stay (partial/perimeter only)
-        #     armed=1, total=1 → armed_away (all zones)
         for i in range(num_partitions):
-            is_armed = bool(partition_status_byte & (1 << (i * 2)))  # Even bits for armed
-            is_total = bool(partition_status_byte & (1 << (i * 2 + 1)))  # Odd bits for total mode
+            is_armed = bool(partition_status_byte & (1 << i))  # bit i = partition i armed
 
-            if is_armed and is_total:
-                state = "armed_away"  # Armed total (all zones)
-            elif is_armed:
-                state = "armed_stay"  # Armed partial (perimeter only)
+            # For partial status (46 bytes), we don't have STAY mode info
+            # Default to "armed_away" when armed (most common case)
+            if is_armed:
+                state = "armed_away"  # Assume total/away mode
             else:
                 state = "disarmed"
 
             partitions.append({
                 "index": i,
                 "state": state,
-                "armed": is_armed,
-                "total": is_total
+                "armed": is_armed
             })
-            logger.debug(f"Partition {i}: armed={is_armed}, total={is_total}, state={state}")
+            logger.info(f"Partition {i}: armed={is_armed}, state={state}")
 
         # If no partitions detected from bits, check if single partition mode
         if not any(p["armed"] for p in partitions) and partition_enabled == 0:
@@ -909,19 +982,77 @@ class ISECNetProtocol:
             return [response[9], response[10]]
         return [0, 0]
 
-    def _parse_byte_response(self, response: bytes, is_ip_receiver: bool) -> Optional[int]:
+    def _parse_byte_response(self, response: bytes, is_ip_receiver: bool, use_v1: bool = False) -> Optional[int]:
         """Parse byte value from server connection response."""
+        logger.info(f"GET_BYTE raw response ({len(response)} bytes): {response.hex() if response else 'empty'}")
+
         if is_ip_receiver:
             # IP Receiver: response[2] == 1 means success
             if len(response) >= 3 and response[2] == 0x01:
                 return 0x01  # Success indicator
             logger.warning(f"IP Receiver GET_BYTE failed: response={response.hex() if response else 'empty'}")
             return None
+        elif use_v1:
+            # V1 Cloud: response[1] contains the XOR byte value
+            if len(response) >= 2:
+                byte_value = response[1]
+                logger.info(f"V1 GET_BYTE parsed byte_value: {byte_value} (0x{byte_value:02X})")
+                return byte_value
+            logger.warning(f"V1 GET_BYTE response too short: {len(response)} bytes")
+            return None
         else:
-            # Cloud: response[8] contains the XOR byte value
+            # V2 Cloud: response[8] contains the XOR byte value
             if len(response) >= 9:
                 return response[8]
             return None
+
+    def _parse_v1_connection_response(self, response: bytes) -> AppConnectionResponse:
+        """Parse V1 protocol connection response.
+
+        V1 response[0] contains the result code (from ISECNetServerResponse):
+        - 254 (0xFE) = SUCCESS (SDK_CTRL_ACCESS_OPEN)
+        - 69 (0x45) = SUCCESS_ETHERNET
+        - 71 (0x47) = SUCCESS_GPRS
+        - 230 (0xE6) = DIFFERENT_CHECKSUM - Actually SUCCESS! Contains GPRS firmware version
+                       The APK treats this as success and parses firmware from response[1:4]
+        - 228 (0xE4) = CENTRAL_NOT_CONNECTED (SDK_CTRL_ARMED)
+        - 232 (0xE8) = CONNECTED_TO_OTHER_DEVICE (SDK_CTRL_EJECT_STORAGE)
+        - 0 = UNKNOWN_ERROR
+        """
+        if len(response) < 1:
+            return AppConnectionResponse.NOT_CONNECTED
+
+        logger.info(f"V1 CONNECT raw response ({len(response)} bytes): {response.hex()}")
+        result_code = response[0]
+        logger.info(f"V1 connection response code: {result_code} (0x{result_code:02X})")
+
+        # Based on APK ISECNetServerResponse enum and wasConnectedWithServer() logic
+        # IMPORTANT: 230 (DIFFERENT_CHECKSUM) is actually SUCCESS with GPRS firmware version!
+        if result_code in [254, 69, 71, 230]:  # SUCCESS(254), SUCCESS_ETHERNET(69), SUCCESS_GPRS(71), DIFFERENT_CHECKSUM(230)
+            if result_code == 230 and len(response) >= 4:
+                # Parse GPRS firmware version from response[1:4]
+                firmware_chars = [chr(b) for b in response[1:4] if 32 <= b < 127]
+                firmware_version = ''.join(firmware_chars)
+                logger.info(f"V1 connection SUCCESS (GPRS), firmware version: {firmware_version}")
+            elif result_code == 69:
+                logger.info("V1 connection SUCCESS (ETHERNET)")
+            elif result_code == 71:
+                logger.info("V1 connection SUCCESS (GPRS/SIM)")
+            else:
+                logger.info(f"V1 connection SUCCESS (code {result_code})")
+            return AppConnectionResponse.SUCCESS
+        elif result_code == 228:  # CENTRAL_NOT_CONNECTED (SDK_CTRL_ARMED)
+            logger.warning("V1 connection failed: Central not connected")
+            return AppConnectionResponse.NOT_CONNECTED
+        elif result_code == 232:  # CONNECTED_TO_OTHER_DEVICE (SDK_CTRL_EJECT_STORAGE)
+            logger.warning("V1 connection failed: Central busy (connected to other device)")
+            return AppConnectionResponse.CENTRAL_BUSY
+        elif result_code == 0:  # UNKNOWN_ERROR
+            logger.warning("V1 connection failed: Unknown error")
+            return AppConnectionResponse.NOT_CONNECTED
+        else:
+            logger.warning(f"V1 unknown connection response: {result_code}")
+            return AppConnectionResponse.NOT_CONNECTED
 
     def _parse_app_connection_response(
         self,
@@ -1133,7 +1264,8 @@ class ISECNetProtocol:
         password: str,
         device_id: Optional[str] = None,
         ip_receiver_address: Optional[str] = None,
-        ip_receiver_port: Optional[int] = None
+        ip_receiver_port: Optional[int] = None,
+        force_v1: bool = False
     ) -> Tuple[bool, str]:
         """Connect to alarm panel via cloud relay or IP receiver.
 
@@ -1143,6 +1275,7 @@ class ISECNetProtocol:
             device_id: Device ID from cloud API
             ip_receiver_address: Direct IP receiver address (optional)
             ip_receiver_port: Direct IP receiver port (optional)
+            force_v1: Force V1 protocol (for fallback)
 
         Returns:
             Tuple of (success, message)
@@ -1150,20 +1283,26 @@ class ISECNetProtocol:
         async with self._lock:
             try:
                 is_ip_receiver = ip_receiver_address is not None
+                use_v1 = force_v1
 
                 # Determine server and port
+                # V2 (AMT_8000, AMT_9000, Eletrificadores): amt8000.intelbras.com.br:9009
+                # V1 (AMT_2018_E_SMART, etc.): amt.intelbras.com.br:9015
                 if is_ip_receiver:
                     server = ip_receiver_address
                     ports = [ip_receiver_port or 9009]
+                elif use_v1:
+                    server = self.AMT_SERVER_V1  # V1 uses different server!
+                    ports = [self.AMT_PORT_V1]   # V1 uses port 9015
                 else:
-                    server = self.AMT_SERVER
-                    ports = self.AMT_PORTS
+                    server = self.AMT_SERVER_V2  # V2 server
+                    ports = self.AMT_PORTS_V2   # V2 uses ports 9009, 80
 
                 # Try connecting to each port
                 connected = False
                 for port in ports:
                     try:
-                        logger.info(f"Connecting to {server}:{port}")
+                        logger.info(f"Connecting to {server}:{port} (V1={use_v1})")
                         self.reader, self.writer = await asyncio.wait_for(
                             asyncio.open_connection(server, port),
                             timeout=self.TIMEOUT
@@ -1179,34 +1318,54 @@ class ISECNetProtocol:
                     return False, "Failed to connect to all ports"
 
                 # Step 1: Server connection
-                logger.info("Sending server connection command")
-                cmd = self._build_server_connection_cmd(is_ip_receiver)
+                logger.info(f"Sending server connection command (V1={use_v1})")
+                cmd = self._build_server_connection_cmd(is_ip_receiver, use_v1)
                 response = await self._send_and_receive(cmd)
 
                 if not response:
                     return False, "No response to server connection"
 
-                byte_value = self._parse_byte_response(response, is_ip_receiver)
+                byte_value = self._parse_byte_response(response, is_ip_receiver, use_v1)
                 if byte_value is None:
                     return False, "Failed to parse server connection response"
 
                 logger.info(f"Server connection successful, byte={byte_value}")
 
                 # Step 2: App connection
-                # After IP Receiver handshake, use standard ISECNet protocol
-                logger.info("Sending app connection command")
-                device_id = device_id or mac
+                logger.info(f"Sending app connection command (V1={use_v1})")
 
-                # Use appropriate APP_CONNECT format
-                cmd = self._build_app_connection_cmd(mac, device_id, byte_value, is_ip_receiver)
+                if use_v1:
+                    # V1 protocol: uses client_id + MAC in hex format
+                    # Client ID identifies this API instance (like Android device ID in the app)
+                    # We generate a consistent ID - must be valid hex characters (0-9, A-F)
+                    # Using a fixed hex string for API client identification
+                    client_id = "A1B2C3D4E5F60001"  # 16 hex chars = 8 bytes (API client identifier)
 
-                response = await self._send_and_receive(cmd)
+                    cmd = self._build_v1_connection_cmd(client_id, mac, byte_value, ConnectionType.ETHERNET)
+                    response = await self._send_and_receive(cmd)
 
-                if not response:
-                    return False, "No response to app connection"
+                    if not response:
+                        return False, "No response to V1 app connection"
 
-                # Parse response based on connection type
-                app_response = self._parse_app_connection_response(response, is_ip_receiver)
+                    app_response = self._parse_v1_connection_response(response)
+
+                    # V1 fallback: try SIM01 if ETHERNET fails with NOT_CONNECTED
+                    if app_response == AppConnectionResponse.NOT_CONNECTED:
+                        logger.info("V1 ETHERNET failed, trying SIM01...")
+                        cmd = self._build_v1_connection_cmd(client_id, mac, byte_value, ConnectionType.SIM01)
+                        response = await self._send_and_receive(cmd)
+                        if response:
+                            app_response = self._parse_v1_connection_response(response)
+                else:
+                    # V2 protocol: uses alarm name format
+                    cmd = self._build_app_connection_cmd(mac, device_id, byte_value, is_ip_receiver)
+                    response = await self._send_and_receive(cmd)
+
+                    if not response:
+                        return False, "No response to app connection"
+
+                    app_response = self._parse_app_connection_response(response, is_ip_receiver)
+
                 if app_response != AppConnectionResponse.SUCCESS:
                     error_messages = {
                         AppConnectionResponse.NOT_CONNECTED: "Not connected",
@@ -1216,13 +1375,21 @@ class ISECNetProtocol:
                     }
                     return False, error_messages.get(app_response, f"App connection failed: {app_response}")
 
-                # Extract source ID
-                self.source_id = self._parse_source_id(response)
-                logger.info(f"App connection successful, sourceID={self.source_id}")
+                # Extract source ID (V2 only, V1 doesn't use source_id)
+                if not use_v1:
+                    self.source_id = self._parse_source_id(response)
+                logger.info(f"App connection successful, sourceID={self.source_id}, V1={use_v1}")
 
                 self.is_connected = True
                 self._is_ip_receiver = is_ip_receiver
+                self._is_v1 = use_v1
                 self._password = password  # Store for V1 commands
+
+                if use_v1:
+                    # V1 mode: No separate AUTH command, password is embedded in each command
+                    logger.info("V1 Cloud: Connected, using ISECNet V1 protocol (no separate AUTH)")
+                    self.is_authenticated = True
+                    return True, "Connected via Cloud (ISECNet V1 mode)"
 
                 if is_ip_receiver:
                     # IP Receiver mode: The panel likely uses ISECNet V1 protocol
@@ -1308,9 +1475,11 @@ class ISECNetProtocol:
                 return False, AlarmStatus()
 
             try:
-                if self._is_ip_receiver:
+                if self._is_ip_receiver or self._is_v1:
                     # ISECNet V1 mode - command includes password
-                    logger.debug("Getting status using ISECNet V1 (IP Receiver mode)")
+                    # Used for both IP Receiver and V1 Cloud connections
+                    mode = "IP Receiver" if self._is_ip_receiver else "V1 Cloud"
+                    logger.debug(f"Getting status using ISECNet V1 ({mode} mode)")
                     cmd = self._build_isecv1_status_cmd(self._password)
                     response = await self._send_and_receive(cmd)
 
@@ -1368,8 +1537,9 @@ class ISECNetProtocol:
                 # Use provided partitions_enabled, fall back to instance cache
                 effective_partitions_enabled = partitions_enabled if partitions_enabled is not None else self._partitions_enabled
 
-                if self._is_ip_receiver:
+                if self._is_ip_receiver or self._is_v1:
                     # ISECNet V1 mode - command includes password
+                    # Used for both IP Receiver and V1 Cloud connections
                     stay = (mode == "stay")
 
                     # Only include partition byte if device has partitions enabled
@@ -1378,7 +1548,8 @@ class ISECNetProtocol:
                         logger.debug(f"Device has partitions disabled (cached), skipping partition byte")
                         effective_partition = None
 
-                    logger.debug(f"Arming using ISECNet V1 (IP Receiver mode), mode={mode}, partition={effective_partition}, partitions_enabled={effective_partitions_enabled}")
+                    conn_mode = "IP Receiver" if self._is_ip_receiver else "V1 Cloud"
+                    logger.debug(f"Arming using ISECNet V1 ({conn_mode} mode), mode={mode}, partition={effective_partition}, partitions_enabled={effective_partitions_enabled}")
                     cmd = self._build_isecv1_arm_cmd(self._password, effective_partition, stay)
 
                     # ARM command behavior: Unlike DISARM, the panel may not respond immediately
@@ -1465,15 +1636,17 @@ class ISECNetProtocol:
                 # Use provided partitions_enabled, fall back to instance cache
                 effective_partitions_enabled = partitions_enabled if partitions_enabled is not None else self._partitions_enabled
 
-                if self._is_ip_receiver:
+                if self._is_ip_receiver or self._is_v1:
                     # ISECNet V1 mode - command includes password
+                    # Used for both IP Receiver and V1 Cloud connections
                     # Only include partition byte if device has partitions enabled
                     effective_partition = partition_index
                     if effective_partitions_enabled is False:
                         logger.debug(f"Device has partitions disabled (cached), skipping partition byte")
                         effective_partition = None
 
-                    logger.debug(f"Disarming using ISECNet V1 (IP Receiver mode), partition={effective_partition}, partitions_enabled={effective_partitions_enabled}")
+                    conn_mode = "IP Receiver" if self._is_ip_receiver else "V1 Cloud"
+                    logger.debug(f"Disarming using ISECNet V1 ({conn_mode} mode), partition={effective_partition}, partitions_enabled={effective_partitions_enabled}")
                     cmd = self._build_isecv1_disarm_cmd(self._password, effective_partition)
                     response = await self._send_and_receive(cmd)
 
