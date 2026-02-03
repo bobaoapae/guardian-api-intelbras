@@ -1,5 +1,10 @@
 # Intelbras Guardian API Add-on
 
+![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-Add--on-41BDF5.svg)
+![License](https://img.shields.io/github/license/bobaoapae/guardian-api-intelbras)
+
 Middleware de API para integração de sistemas de alarme Intelbras Guardian com Home Assistant.
 
 ## Sobre
