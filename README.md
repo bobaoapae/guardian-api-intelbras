@@ -392,34 +392,86 @@ Isso é uma **limitação da plataforma Android**, não da integração. O Andro
 
 O domínio `alarm_control_panel` **não é suportado** pelo Android Device Controls.
 
-**Solução alternativa**: Use scripts do Home Assistant para controlar o alarme:
+**Solução recomendada**: Use template switches para controlar o alarme. Eles aparecem nos Controles de Dispositivos Android e mostram o estado atual:
+
+```yaml
+# configuration.yaml
+template:
+  - switch:
+      # Switch para modo "Em Casa" (arma apenas partições selecionadas)
+      - name: "Alarme Em Casa"
+        unique_id: alarme_switch_home
+        state: "{{ is_state('alarm_control_panel.SEU_ALARME', 'armed_home') }}"
+        turn_on:
+          - service: alarm_control_panel.alarm_arm_home
+            target:
+              entity_id: alarm_control_panel.SEU_ALARME
+        turn_off:
+          - service: alarm_control_panel.alarm_disarm
+            target:
+              entity_id: alarm_control_panel.SEU_ALARME
+        icon: >-
+          {% if is_state('alarm_control_panel.SEU_ALARME', 'armed_home') %}
+            mdi:shield-home
+          {% else %}
+            mdi:shield-home-outline
+          {% endif %}
+
+      # Switch para modo "Ausente" (arma todas as partições)
+      - name: "Alarme Ausente"
+        unique_id: alarme_switch_away
+        state: "{{ is_state('alarm_control_panel.SEU_ALARME', 'armed_away') }}"
+        turn_on:
+          - service: alarm_control_panel.alarm_arm_away
+            target:
+              entity_id: alarm_control_panel.SEU_ALARME
+        turn_off:
+          - service: alarm_control_panel.alarm_disarm
+            target:
+              entity_id: alarm_control_panel.SEU_ALARME
+        icon: >-
+          {% if is_state('alarm_control_panel.SEU_ALARME', 'armed_away') %}
+            mdi:shield-lock
+          {% else %}
+            mdi:shield-off
+          {% endif %}
+```
+
+> **Nota**: Substitua `alarm_control_panel.SEU_ALARME` pela entidade do seu alarme unificado (ex: `alarm_control_panel.casa`).
+>
+> Se não tiver o alarme unificado configurado, use a entidade da partição individual (ex: `alarm_control_panel.casa_particao_a`).
+
+Os switches criados aparecerão nos Controles de Dispositivos Android (app Companion) e permitem:
+- Ver o estado atual do alarme
+- Armar/desarmar com um toque
+- Ícones diferentes para cada estado
+
+**Alternativa com scripts** (apenas ações, sem mostrar estado):
 
 ```yaml
 # configuration.yaml ou scripts.yaml
 script:
-  armar_alarme:
-    alias: "Armar Alarme"
+  armar_alarme_ausente:
+    alias: "Armar Alarme (Ausente)"
     sequence:
       - service: alarm_control_panel.alarm_arm_away
         target:
-          entity_id: alarm_control_panel.intelbras_guardian_particao_1
-
-  desarmar_alarme:
-    alias: "Desarmar Alarme"
-    sequence:
-      - service: alarm_control_panel.alarm_disarm
-        target:
-          entity_id: alarm_control_panel.intelbras_guardian_particao_1
+          entity_id: alarm_control_panel.SEU_ALARME
 
   armar_alarme_em_casa:
     alias: "Armar Alarme (Em Casa)"
     sequence:
       - service: alarm_control_panel.alarm_arm_home
         target:
-          entity_id: alarm_control_panel.intelbras_guardian_particao_1
-```
+          entity_id: alarm_control_panel.SEU_ALARME
 
-Os scripts criados aparecerão nos Controles de Dispositivos Android e permitirão controlar o alarme.
+  desarmar_alarme:
+    alias: "Desarmar Alarme"
+    sequence:
+      - service: alarm_control_panel.alarm_disarm
+        target:
+          entity_id: alarm_control_panel.SEU_ALARME
+```
 
 ## Desenvolvimento
 
