@@ -610,8 +610,8 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         return attrs
 
     async def async_alarm_disarm(self, code: str = None) -> None:
-        """Disarm all partitions."""
-        _LOGGER.info(f"Unified alarm: Disarming all partitions for device {self._device_id}")
+        """Disarm all partitions that are currently armed."""
+        _LOGGER.info(f"Unified alarm: Disarming armed partitions for device {self._device_id}")
 
         self._optimistic_state = AlarmControlPanelState.DISARMED
         self.async_write_ha_state()
@@ -620,8 +620,24 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
             all_success = True
             errors = []
 
-            # Disarm all partitions (use away_partitions as it's the superset)
-            partitions_to_disarm = set(self._away_partitions) | set(self._home_partitions)
+            # Get current partition states to only disarm armed partitions
+            # This avoids sending DISARM to already-disarmed partitions which can
+            # cause unexpected behavior on some panels (e.g., AMT_2018_E_SMART)
+            partition_states = self._get_partition_states()
+            armed_states = {"armed_away", "armed_stay", "armed_home", "armed"}
+
+            # Only disarm partitions that are actually armed
+            all_partitions = set(self._away_partitions) | set(self._home_partitions)
+            partitions_to_disarm = []
+            for idx in all_partitions:
+                status = partition_states.get(idx, "")
+                status_lower = str(status).lower() if status else ""
+                if status_lower in armed_states:
+                    partitions_to_disarm.append(idx)
+                else:
+                    _LOGGER.debug(f"Partition {idx} already disarmed (status={status}), skipping")
+
+            _LOGGER.info(f"Partitions to disarm: {partitions_to_disarm} (armed from {all_partitions})")
 
             for idx in partitions_to_disarm:
                 if idx < len(self._partitions):
@@ -651,6 +667,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
             await self.coordinator.async_request_refresh()
             self._optimistic_state = None
+            self.async_write_ha_state()
 
         self.hass.async_create_task(_execute_disarm())
 
@@ -670,10 +687,15 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
             # First disarm partitions not in home mode (if they're armed)
             partition_states = self._get_partition_states()
+            armed_states = {"armed_away", "armed_stay", "armed_home", "armed"}
             for idx, status in partition_states.items():
-                if idx not in self._home_partitions and status and "armed" in status.lower():
+                status_lower = str(status).lower() if status else ""
+                # Only disarm if partition is not in home mode AND is actually armed
+                # Note: Can't use "armed" in status because "disarmed" contains "armed"!
+                if idx not in self._home_partitions and status_lower in armed_states:
                     if idx < len(self._partitions):
                         partition_id = self._partitions[idx].get("id")
+                        _LOGGER.info(f"Disarming partition {idx} (not in home mode, status={status})")
                         try:
                             await self.coordinator.client.disarm_partition(
                                 self._device_id, partition_id
@@ -730,6 +752,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
             await self.coordinator.async_request_refresh()
             self._optimistic_state = None
+            self.async_write_ha_state()
 
         self.hass.async_create_task(_execute_arm_home())
 
@@ -796,5 +819,6 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
             await self.coordinator.async_request_refresh()
             self._optimistic_state = None
+            self.async_write_ha_state()
 
         self.hass.async_create_task(_execute_arm_away())
