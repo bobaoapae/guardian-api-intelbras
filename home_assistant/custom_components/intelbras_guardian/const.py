@@ -76,3 +76,4 @@ EVENT_ALARM = f"{DOMAIN}_alarm_event"
 CONF_UNIFIED_ALARM = "unified_alarm"  # Enable unified alarm entity
 CONF_HOME_PARTITIONS = "home_partitions"  # Partition indices to arm in "Home" mode
 CONF_AWAY_PARTITIONS = "away_partitions"  # Partition indices to arm in "Away" mode
+CONF_PARTITION_ARM_MODES = "partition_arm_modes"  # Dict mapping partition index to arm mode ("away" or "home")

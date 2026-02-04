@@ -61,6 +61,18 @@ class ISECNetClient:
             self._device_locks[device_id] = asyncio.Lock()
         return self._device_locks[device_id]
 
+    def _cleanup_device_lock(self, device_id: int) -> None:
+        """Remove unused device lock to prevent memory leak.
+
+        Should be called after disconnecting a device.
+        Only removes if lock is not held (not in use).
+        """
+        if device_id in self._device_locks:
+            lock = self._device_locks[device_id]
+            if not lock.locked():
+                del self._device_locks[device_id]
+                logger.debug(f"Cleaned up device lock for {device_id}")
+
     async def start(self):
         """Start the client service (including keep-alive loop)."""
         if self._running:
@@ -123,6 +135,8 @@ class ISECNetClient:
             except Exception as e:
                 logger.warning(f"Error disconnecting device {device_id}: {e}")
             del self._connections[device_id]
+            # Clean up device lock to prevent memory leak
+            self._cleanup_device_lock(device_id)
             logger.info(f"Device {device_id} disconnected")
 
     async def connect(

@@ -67,22 +67,47 @@ class InMemoryStateManager:
             self._last_known_status = {}
 
     def _save_sessions(self) -> None:
-        """Save sessions to file."""
+        """Save sessions to file using atomic write (temp + rename).
+
+        This prevents data corruption if the process crashes during write.
+        """
         try:
             # Ensure data directory exists
             SESSIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
             # Convert zone friendly names int keys to string for JSON
             zone_names_serializable = {}
             for device_id, zones in self._zone_friendly_names.items():
                 zone_names_serializable[device_id] = {str(k): v for k, v in zones.items()}
-            with open(SESSIONS_FILE, "w") as f:
-                json.dump({
-                    "tokens": self._tokens,
-                    "device_passwords": self._device_passwords,
-                    "zone_friendly_names": zone_names_serializable,
-                    "last_known_status": self._last_known_status
-                }, f, indent=2)
-            logger.debug(f"Saved {len(self._tokens)} sessions to file")
+
+            data = {
+                "tokens": self._tokens,
+                "device_passwords": self._device_passwords,
+                "zone_friendly_names": zone_names_serializable,
+                "last_known_status": self._last_known_status
+            }
+
+            # Atomic write: write to temp file first, then rename
+            temp_file = SESSIONS_FILE.with_suffix('.tmp')
+            try:
+                with open(temp_file, "w") as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()
+                    # Ensure data is written to disk
+                    import os
+                    os.fsync(f.fileno())
+
+                # Atomic rename (on most systems, rename is atomic)
+                temp_file.replace(SESSIONS_FILE)
+                logger.debug(f"Saved {len(self._tokens)} sessions to file (atomic)")
+            except Exception as e:
+                # Clean up temp file on failure
+                if temp_file.exists():
+                    try:
+                        temp_file.unlink()
+                    except:
+                        pass
+                raise e
         except Exception as e:
             logger.error(f"Could not save sessions to file: {e}")
 

@@ -34,9 +34,30 @@
         "title": "Intelbras Guardian Options",
         "description": "Select an option to configure.",
         "menu_options": {
+          "configure_unified_alarm": "Configure Unified Alarm",
           "configure_device_password": "Configure Device Password",
           "manage_zones": "Manage Zone Names",
           "reauth": "Re-authenticate (if session expired)"
+        }
+      },
+      "configure_unified_alarm": {
+        "title": "Select Device for Unified Alarm",
+        "description": "Select a device with multiple partitions to configure the unified alarm.\n\nThe unified alarm allows controlling multiple partitions as a single entity with Home/Away modes.",
+        "data": {
+          "device": "Device"
+        }
+      },
+      "select_partitions": {
+        "title": "Configure Unified Alarm",
+        "description": "Configure which partitions to arm for each mode:\n\n**Home Mode (Em Casa):** Arms only selected partitions (e.g., perimeter only)\n**Away Mode (Ausente):** Arms all selected partitions\n\n**Arm Mode per Partition:** Choose how each partition should arm (Total or Parcial)",
+        "data": {
+          "enable_unified": "Enable Unified Alarm",
+          "home_partitions": "Partitions for Home Mode",
+          "away_partitions": "Partitions for Away Mode",
+          "arm_mode_0": "Partition 1 Arm Mode",
+          "arm_mode_1": "Partition 2 Arm Mode",
+          "arm_mode_2": "Partition 3 Arm Mode",
+          "arm_mode_3": "Partition 4 Arm Mode"
         }
       },
       "reauth": {
@@ -71,11 +92,13 @@
       "delete_failed": "Failed to delete password.",
       "password_required": "Password is required.",
       "oauth_callback_failed": "Authentication failed. Make sure you copied the complete callback URL.",
-      "callback_url_required": "Please paste the callback URL."
+      "callback_url_required": "Please paste the callback URL.",
+      "select_at_least_one": "Please select at least one partition."
     },
     "abort": {
       "not_loaded": "Integration not loaded. Please try again.",
-      "no_devices": "No devices found."
+      "no_devices": "No devices found.",
+      "no_multi_partition_devices": "No devices with multiple partitions found."
     }
   }
 }

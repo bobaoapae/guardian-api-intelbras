@@ -687,6 +687,7 @@ async def get_alarm_status(
             arm_mode=status.arm_mode,
             is_triggered=status.is_triggered,
             partitions=partitions,
+            partitions_enabled=status.partitions_enabled,
             message="Status retrieved successfully",
             # Eletrificador-specific fields
             is_eletrificador=status.is_eletrificador,

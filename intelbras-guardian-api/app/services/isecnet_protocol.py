@@ -274,11 +274,24 @@ class ISECNetProtocol:
         # Convert client_id to 8 hex bytes (padded with leading zeros)
         # APK uses Android device ID which is 16 hex chars (8 bytes)
         client_id_hex = client_id.upper().zfill(16)  # Pad to 16 hex chars = 8 bytes
-        client_id_bytes = [int(client_id_hex[i:i+2], 16) for i in range(0, 16, 2)]
+        try:
+            client_id_bytes = [int(client_id_hex[i:i+2], 16) for i in range(0, 16, 2)]
+        except ValueError as e:
+            raise ValueError(f"Invalid client_id format (must be hex): {client_id}") from e
 
         # Convert MAC to 6 hex bytes
         mac_clean = mac.replace(":", "").replace("-", "").upper()
-        mac_bytes = [int(mac_clean[i:i+2], 16) for i in range(0, 12, 2)]
+
+        # Validate MAC format
+        if len(mac_clean) != 12:
+            raise ValueError(f"Invalid MAC address length: expected 12 hex chars, got {len(mac_clean)} ('{mac}')")
+        if not all(c in '0123456789ABCDEF' for c in mac_clean):
+            raise ValueError(f"Invalid MAC address format (must be hex): {mac}")
+
+        try:
+            mac_bytes = [int(mac_clean[i:i+2], 16) for i in range(0, 12, 2)]
+        except ValueError as e:
+            raise ValueError(f"Invalid MAC address format: {mac}") from e
 
         packet = [
             18,  # Length of payload (cmd + type + clientId + MAC + 0 + connType)
@@ -342,14 +355,19 @@ class ISECNetProtocol:
 
         Password is converted to digits (0-9), with '0' becoming 10.
         For IP Receiver: Uses standard ISECNet V2 format but WITHOUT encryption.
+
+        Raises:
+            ValueError: If password contains non-digit characters
         """
         # Convert password to digit array
         password_digits = []
         for char in password:
             if char == '0':
                 password_digits.append(10)
-            else:
+            elif char.isdigit():
                 password_digits.append(int(char))
+            else:
+                raise ValueError(f"Password must contain only digits (0-9), got '{char}'")
 
         # Pad to 6 digits
         while len(password_digits) < 6:
@@ -862,9 +880,22 @@ class ISECNetProtocol:
             3: 16,    # AMT_8000_PRO
             144: 8,   # AMT_9000
             54: 0,    # AMT_1000_SMART
+            # Additional models from APK AlarmModel enum
+            30: 2,    # AMT_2018_E_EG
+            49: 2,    # AMT_2016_E3G
+            50: 2,    # AMT_2018_E3G
+            97: 4,    # AMT_1016_NET
+            46: 2,    # AMT_2118_EG
+            52: 2,    # AMT_2018_E_SMART
+            53: 0,    # ELC_6012_NET (eletrificador)
+            57: 0,    # ELC_6012_IND (eletrificador)
         }
-        # Default: 2 partitions for most models
-        return partition_counts.get(model_code, 2)
+        result = partition_counts.get(model_code)
+        if result is None:
+            # Default: 2 partitions for unknown models
+            logger.warning(f"Unknown model code 0x{model_code:02X} ({model_code}), defaulting to 2 partitions")
+            return 2
+        return result
 
     def _parse_isecv1_command_response(self, response: bytes) -> Tuple[bool, str]:
         """Parse ISECNet V1 command response (arm/disarm).
@@ -893,10 +924,40 @@ class ISECNetProtocol:
 
         logger.debug(f"ISECNet V1 command response ({len(response)} bytes): {response.hex()}")
 
-        # 46-byte response = partial status response = success
+        # ISECNetResponse error codes that indicate failure
+        error_codes = {
+            0: "Unknown error",           # UNKNOWN_ERROR
+            224: "Invalid package",       # INVALID_PACKAGE
+            225: "Incorrect password",    # INCORRECT_PASSWORD
+            226: "Invalid command",       # INVALID_COMMAND
+            227: "No partitions",         # CENTRAL_DOES_NOT_HAVE_PARTITIONS
+            228: "Open zones",            # OPEN_ZONES
+            229: "Command deprecated",    # COMMAND_DEPRECATED
+            255: "Invalid model",         # INVALID_MODEL
+            230: "Bypass denied",         # BYPASS_DENIED
+            231: "Deactivation denied",   # DEACTIVATION_DENIED
+            232: "Bypass - central activated",  # BYPASS_CENTRAL_ACTIVATED
+        }
+
+        # For all responses with enough bytes, check for error codes first
+        # This ensures we don't treat error responses as success just because of length
+        if len(response) >= 3:
+            response_code = response[2]
+            if response_code in error_codes:
+                error_msg = error_codes[response_code]
+                logger.warning(f"ISECNet V1 command failed: {error_msg} (0x{response_code:02X})")
+                return False, error_msg
+
+        # 46-byte response = partial status response = success (if no error code)
         if len(response) == 46:
-            logger.debug("46-byte response (partial status) - treating as success")
-            return True, "OK"
+            # Verify it starts with expected command echo (0xE9)
+            if response[1] == 0xE9:
+                logger.debug("46-byte response (partial status) - command succeeded")
+                return True, "OK"
+            else:
+                logger.warning(f"46-byte response but unexpected format: byte[1]=0x{response[1]:02X}")
+                # Still treat as success if no error code was found
+                return True, "OK"
 
         # 96+ bytes = complete status response = success
         if len(response) >= 96:
@@ -904,36 +965,18 @@ class ISECNetProtocol:
             return True, "OK"
 
         # For shorter responses, check the response code at bytes[2]
+        # Note: Error codes are already checked above, so if we get here with >= 3 bytes,
+        # it's either SUCCESS (254) or an unknown code
         if len(response) >= 3:
             response_code = response[2]
-
-            # ISECNetResponse code mapping
-            response_messages = {
-                254: ("OK", True),              # SUCCESS
-                0: ("Unknown error", False),    # UNKNOWN_ERROR
-                224: ("Invalid package", False),       # INVALID_PACKAGE
-                225: ("Incorrect password", False),    # INCORRECT_PASSWORD
-                226: ("Invalid command", False),       # INVALID_COMMAND
-                227: ("No partitions", False),         # CENTRAL_DOES_NOT_HAVE_PARTITIONS
-                228: ("Open zones", False),            # OPEN_ZONES
-                229: ("Command deprecated", False),    # COMMAND_DEPRECATED
-                255: ("Invalid model", False),         # INVALID_MODEL
-                230: ("Bypass denied", False),         # BYPASS_DENIED
-                231: ("Deactivation denied", False),   # DEACTIVATION_DENIED
-                232: ("Bypass - central activated", False),  # BYPASS_CENTRAL_ACTIVATED
-            }
-
-            if response_code in response_messages:
-                message, success = response_messages[response_code]
-                if not success:
-                    logger.warning(f"ISECNet V1 command failed: {message} (0x{response_code:02X})")
-                return success, message
+            if response_code == 254:  # SUCCESS
+                return True, "OK"
             else:
-                logger.warning(f"Unknown ISECNet V1 response code: 0x{response_code:02X}")
-                # If it's not a known error code and we have data, assume success
+                # Unknown response code - log but treat as success if not a known error
+                logger.debug(f"ISECNet V1 response code: 0x{response_code:02X} (not a known error)")
                 return True, "OK"
 
-        return False, "Invalid response"
+        return False, "Invalid response (too short)"
 
     async def _send_and_receive(
         self,
@@ -1385,20 +1428,34 @@ class ISECNetProtocol:
                 self._is_v1 = use_v1
                 self._password = password  # Store for V1 commands
 
-                if use_v1:
+                if use_v1 or is_ip_receiver:
                     # V1 mode: No separate AUTH command, password is embedded in each command
-                    logger.info("V1 Cloud: Connected, using ISECNet V1 protocol (no separate AUTH)")
-                    self.is_authenticated = True
-                    return True, "Connected via Cloud (ISECNet V1 mode)"
+                    # Validate password by sending a status command
+                    mode = "V1 Cloud" if use_v1 else "IP Receiver"
+                    logger.info(f"{mode}: Validating password with status command")
 
-                if is_ip_receiver:
-                    # IP Receiver mode: The panel likely uses ISECNet V1 protocol
-                    # V1 doesn't have a separate AUTH command - password is embedded in each command
-                    # The IP Receiver handshake (GET_BYTE + APP_CONNECT) establishes the tunnel
-                    # From here, we send V1 commands with embedded password
-                    logger.info("IP Receiver: Tunnel established, using ISECNet V1 protocol (no separate AUTH)")
+                    cmd = self._build_isecv1_status_cmd(password)
+                    response = await self._send_and_receive(cmd, timeout=5.0)
+
+                    if not response:
+                        return False, f"{mode}: No response to status command (password validation)"
+
+                    # Check for password error in response
+                    if len(response) >= 3:
+                        response_code = response[2]
+                        if response_code == 225:  # INCORRECT_PASSWORD
+                            logger.warning(f"{mode}: Invalid password")
+                            return False, "Invalid password"
+
+                    # Password validated, parse status to cache partitions_enabled
+                    valid, data = self._parse_isecv1_response(response)
+                    if valid and len(data) > 21:
+                        self._partitions_enabled = bool(data[21])
+                        logger.debug(f"Cached partitions_enabled={self._partitions_enabled} from auth validation")
+
                     self.is_authenticated = True
-                    return True, "Connected via IP Receiver (ISECNet V1 mode)"
+                    logger.info(f"{mode}: Connected and password validated")
+                    return True, f"Connected via {mode} (ISECNet V1 mode)"
 
                 # Cloud mode: Step 3: Authenticate with ISECNet V2
                 logger.info("Sending authentication command (ISECNet V2)")
@@ -1436,33 +1493,42 @@ class ISECNetProtocol:
 
             except Exception as e:
                 logger.error(f"Connection error: {e}")
-                await self.disconnect()
+                # Clean up without calling disconnect() to avoid deadlock
+                # (we already hold the lock, and disconnect() tries to acquire it)
+                await self._cleanup_connection()
                 return False, str(e)
+
+    async def _cleanup_connection(self):
+        """Clean up connection resources (internal, assumes lock is already held or not needed)."""
+        try:
+            if self.writer:
+                # Send disconnect command
+                if self.is_connected:
+                    cmd = self._build_disconnect_cmd()
+                    try:
+                        self.writer.write(cmd)
+                        await self.writer.drain()
+                    except:
+                        pass
+
+                self.writer.close()
+                try:
+                    await self.writer.wait_closed()
+                except:
+                    pass
+        except:
+            pass
+        finally:
+            self.reader = None
+            self.writer = None
+            self.is_connected = False
+            self.is_authenticated = False
+            self.source_id = [0, 0]
 
     async def disconnect(self):
         """Disconnect from alarm panel."""
         async with self._lock:
-            try:
-                if self.writer:
-                    # Send disconnect command
-                    if self.is_connected:
-                        cmd = self._build_disconnect_cmd()
-                        try:
-                            self.writer.write(cmd)
-                            await self.writer.drain()
-                        except:
-                            pass
-
-                    self.writer.close()
-                    await self.writer.wait_closed()
-            except:
-                pass
-            finally:
-                self.reader = None
-                self.writer = None
-                self.is_connected = False
-                self.is_authenticated = False
-                self.source_id = [0, 0]
+            await self._cleanup_connection()
 
     async def get_status(self) -> Tuple[bool, AlarmStatus]:
         """Get alarm panel status.
@@ -1481,7 +1547,7 @@ class ISECNetProtocol:
                     mode = "IP Receiver" if self._is_ip_receiver else "V1 Cloud"
                     logger.debug(f"Getting status using ISECNet V1 ({mode} mode)")
                     cmd = self._build_isecv1_status_cmd(self._password)
-                    response = await self._send_and_receive(cmd)
+                    response = await self._send_and_receive(cmd, retries=1, retry_delay=0.5)
 
                     if not response:
                         return False, AlarmStatus()
@@ -1493,7 +1559,7 @@ class ISECNetProtocol:
                     # ISECNet V2 mode (Cloud)
                     logger.debug("Getting status using ISECNet V2")
                     cmd = self._build_status_cmd()
-                    response = await self._send_and_receive(cmd)
+                    response = await self._send_and_receive(cmd, retries=1, retry_delay=0.5)
 
                     if not response:
                         return False, AlarmStatus()
@@ -1553,9 +1619,10 @@ class ISECNetProtocol:
                     cmd = self._build_isecv1_arm_cmd(self._password, effective_partition, stay)
 
                     # ARM command behavior: Unlike DISARM, the panel may not respond immediately
-                    # due to exit delay or zone checking. Use a shorter timeout and treat
-                    # timeout as potential success (verify with status later).
-                    response = await self._send_and_receive(cmd, timeout=3.0)
+                    # due to exit delay or zone checking. Use a reasonable timeout and
+                    # enable retries for network glitches. Treat timeout as potential success
+                    # (verify with status later).
+                    response = await self._send_and_receive(cmd, timeout=5.0, retries=1, retry_delay=0.5)
 
                     if not response:
                         # No response to ARM is common - panel may be processing exit delay
@@ -1572,7 +1639,7 @@ class ISECNetProtocol:
                         logger.info(f"Device doesn't have partitions enabled, retrying without partition byte")
                         self._partitions_enabled = False  # Update instance cache
                         cmd = self._build_isecv1_arm_cmd(self._password, None, stay)
-                        response = await self._send_and_receive(cmd, timeout=3.0)
+                        response = await self._send_and_receive(cmd, timeout=5.0, retries=1, retry_delay=0.5)
 
                         if not response:
                             # Same as above - no response may mean command is being processed

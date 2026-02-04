@@ -17,6 +17,7 @@ from .const import (
     CONF_FASTAPI_HOST,
     CONF_FASTAPI_PORT,
     CONF_HOME_PARTITIONS,
+    CONF_PARTITION_ARM_MODES,
     CONF_SESSION_ID,
     CONF_UNIFIED_ALARM,
     DEFAULT_FASTAPI_PORT,
@@ -242,6 +243,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         device_config = unified_config.get(device_key, {})
         current_home = device_config.get(CONF_HOME_PARTITIONS, [0])  # Default: first partition
         current_away = device_config.get(CONF_AWAY_PARTITIONS, None)  # Default: all
+        current_arm_modes = device_config.get(CONF_PARTITION_ARM_MODES, {})  # Dict: partition_idx -> mode
 
         # Build partition options (use index in list)
         partition_options = {}
@@ -259,6 +261,12 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             away_partitions = [int(i) for i in user_input.get("away_partitions", [])]
             enable_unified = user_input.get("enable_unified", True)
 
+            # Parse arm modes for each partition
+            arm_modes = {}
+            for idx in range(len(self._device_partitions)):
+                mode_key = f"arm_mode_{idx}"
+                arm_modes[str(idx)] = user_input.get(mode_key, "away")
+
             if not home_partitions:
                 errors["home_partitions"] = "select_at_least_one"
             elif not away_partitions:
@@ -270,6 +278,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     "enabled": enable_unified,
                     CONF_HOME_PARTITIONS: home_partitions,
                     CONF_AWAY_PARTITIONS: away_partitions,
+                    CONF_PARTITION_ARM_MODES: arm_modes,
                     "mac": self._device_mac,
                 }
 
@@ -284,23 +293,41 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         # Check if unified is currently enabled
         current_enabled = device_config.get("enabled", True)
 
+        # Build schema with partition selections and arm mode per partition
+        schema_dict = {
+            vol.Required("enable_unified", default=current_enabled): bool,
+            vol.Required(
+                "home_partitions",
+                default=[str(i) for i in current_home]
+            ): vol.All(
+                cv.multi_select(partition_options),
+            ),
+            vol.Required(
+                "away_partitions",
+                default=[str(i) for i in current_away]
+            ): vol.All(
+                cv.multi_select(partition_options),
+            ),
+        }
+
+        # Add arm mode selector for each partition
+        arm_mode_options = {
+            "away": "Total (Away)",
+            "home": "Parcial (Stay)",
+        }
+        for idx, p in enumerate(self._device_partitions):
+            name = p.get("name", f"Particao {idx + 1}")
+            # Get current mode for this partition, default to "away"
+            current_mode = current_arm_modes.get(str(idx), "away")
+            schema_dict[vol.Required(
+                f"arm_mode_{idx}",
+                default=current_mode,
+                description={"suggested_value": current_mode}
+            )] = vol.In(arm_mode_options)
+
         return self.async_show_form(
             step_id="select_partitions",
-            data_schema=vol.Schema({
-                vol.Required("enable_unified", default=current_enabled): bool,
-                vol.Required(
-                    "home_partitions",
-                    default=[str(i) for i in current_home]
-                ): vol.All(
-                    cv.multi_select(partition_options),
-                ),
-                vol.Required(
-                    "away_partitions",
-                    default=[str(i) for i in current_away]
-                ): vol.All(
-                    cv.multi_select(partition_options),
-                ),
-            }),
+            data_schema=vol.Schema(schema_dict),
             errors=errors,
             description_placeholders={
                 "device_name": next(
