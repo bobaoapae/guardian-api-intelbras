@@ -78,14 +78,42 @@ class GuardianCoordinator(DataUpdateCoordinator):
 
     @callback
     def _on_sse_event(self, event_data: Dict[str, Any]) -> None:
-        """Handle SSE alarm event - trigger immediate refresh."""
-        _LOGGER.info("SSE alarm event received, triggering refresh: %s", event_data)
+        """Handle SSE alarm event."""
+        _LOGGER.info("SSE event received: %s", event_data)
 
         # Fire a Home Assistant event for automations
         self.hass.bus.async_fire(EVENT_ALARM, event_data)
 
-        # Trigger an immediate coordinator refresh
-        self.hass.async_create_task(self.async_request_refresh())
+        # If this is a state_changed event from our own command, apply immediately
+        if event_data.get("event_type") == "state_changed":
+            self._apply_state_change(event_data)
+        else:
+            # External event (cloud) - trigger full refresh
+            self.hass.async_create_task(self.async_request_refresh())
+
+    def _apply_state_change(self, event_data: Dict[str, Any]) -> None:
+        """Apply a state change from command directly to cached data."""
+        device_id = event_data.get("device_id")
+        new_status = event_data.get("new_status")
+        partition_id = event_data.get("partition_id")
+
+        if not self.data or not new_status:
+            return
+
+        # Update partition status in cached data
+        for partition in self.data.get("partitions", []):
+            if partition.get("device_id") == device_id:
+                if partition_id is None or partition.get("id") == partition_id:
+                    partition["status"] = new_status
+
+        # Update device-level arm_mode
+        device = self.data.get("devices", {}).get(device_id)
+        if device:
+            device["arm_mode"] = new_status
+            device["is_armed"] = new_status != "disarmed"
+
+        # Notify HA that data changed (entities will read new state)
+        self.async_set_updated_data(self.data)
 
     async def _async_update_data(self) -> Dict[str, Any]:
         """Fetch data from API."""

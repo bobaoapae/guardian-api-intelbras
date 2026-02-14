@@ -9,7 +9,7 @@ from homeassistant.components.alarm_control_panel import (
     AlarmControlPanelState,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -211,6 +211,74 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
         self._optimistic_state = None
         self.async_write_ha_state()
 
+    def _schedule_optimistic_clear(self, expected_state, timeout=15):
+        """Schedule clearing optimistic state after timeout."""
+        async def _clear():
+            await asyncio.sleep(timeout)
+            if self._optimistic_state is not None:
+                self._optimistic_state = None
+                self.async_write_ha_state()
+                self._verify_state(expected_state)
+        self.hass.async_create_task(_clear())
+
+    def _verify_state(self, expected_state):
+        """Verify state after optimistic clear and notify if mismatch."""
+        actual = self.state
+        if actual != expected_state:
+            if expected_state in (AlarmControlPanelState.ARMED_AWAY, AlarmControlPanelState.ARMED_HOME):
+                self.hass.components.persistent_notification.async_create(
+                    "O alarme pode nao ter armado corretamente.\n\n"
+                    "Verifique se existem zonas abertas ou "
+                    "se o painel respondeu ao comando.",
+                    title="Aviso: Alarme nao confirmado",
+                    notification_id=f"alarm_verify_{self._device_id}"
+                )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        if self._optimistic_state is not None:
+            real_state = self._get_real_state()
+            if real_state == self._optimistic_state:
+                self._optimistic_state = None
+        super()._handle_coordinator_update()
+
+    def _get_real_state(self):
+        """Get the real state from coordinator data (ignoring optimistic)."""
+        partition = self.coordinator.get_partition(self._device_id, self._partition_id)
+        device = self.coordinator.get_device(self._device_id)
+
+        if not partition:
+            return None
+
+        if device and device.get("is_triggered"):
+            return AlarmControlPanelState.TRIGGERED
+
+        status = partition.get("status")
+        if not status and device:
+            status = device.get("arm_mode")
+
+        if not status:
+            return AlarmControlPanelState.DISARMED
+
+        ha_state = STATE_MAPPING.get(status)
+        if ha_state:
+            state_map = {
+                "armed_away": AlarmControlPanelState.ARMED_AWAY,
+                "armed_home": AlarmControlPanelState.ARMED_HOME,
+                "disarmed": AlarmControlPanelState.DISARMED,
+                "triggered": AlarmControlPanelState.TRIGGERED,
+            }
+            return state_map.get(ha_state, AlarmControlPanelState.DISARMED)
+
+        status_upper = str(status).upper()
+        if "AWAY" in status_upper or "ARMED" in status_upper:
+            return AlarmControlPanelState.ARMED_AWAY
+        if "STAY" in status_upper or "HOME" in status_upper:
+            return AlarmControlPanelState.ARMED_HOME
+
+        return AlarmControlPanelState.DISARMED
+
     @property
     def extra_state_attributes(self):
         """Return extra state attributes."""
@@ -296,12 +364,10 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                         title="Erro ao Desarmar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
                     )
-                finally:
-                    # Refresh to sync real state (will clear optimistic state if matches)
-                    await self.coordinator.async_request_refresh()
-                    # Clear optimistic state after refresh
-                    self._optimistic_state = None
-                    self.async_write_ha_state()
+                    return
+                # Don't clear optimistic state here - let SSE event update
+                # coordinator data, which will make optimistic state redundant.
+                self._schedule_optimistic_clear(AlarmControlPanelState.DISARMED)
 
         # Run in background
         self.hass.async_create_task(_execute_disarm())
@@ -364,12 +430,9 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
                     )
-                finally:
-                    # Refresh to sync real state
-                    await self.coordinator.async_request_refresh()
-                    # Clear optimistic state after refresh
-                    self._optimistic_state = None
-                    self.async_write_ha_state()
+                    return
+                # Don't clear optimistic state here - let SSE event update
+                self._schedule_optimistic_clear(AlarmControlPanelState.ARMED_HOME)
 
         # Run in background
         self.hass.async_create_task(_execute_arm_home())
@@ -432,12 +495,9 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
                     )
-                finally:
-                    # Refresh to sync real state
-                    await self.coordinator.async_request_refresh()
-                    # Clear optimistic state after refresh
-                    self._optimistic_state = None
-                    self.async_write_ha_state()
+                    return
+                # Don't clear optimistic state here - let SSE event update
+                self._schedule_optimistic_clear(AlarmControlPanelState.ARMED_AWAY)
 
         # Run in background
         self.hass.async_create_task(_execute_arm_away())
@@ -660,6 +720,72 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         return attrs
 
+    def _schedule_optimistic_clear(self, expected_state, timeout=15):
+        """Schedule clearing optimistic state after timeout."""
+        async def _clear():
+            await asyncio.sleep(timeout)
+            if self._optimistic_state is not None:
+                self._optimistic_state = None
+                self.async_write_ha_state()
+                self._verify_state(expected_state)
+        self.hass.async_create_task(_clear())
+
+    def _verify_state(self, expected_state):
+        """Verify state after optimistic clear and notify if mismatch."""
+        actual = self.state
+        if actual != expected_state:
+            if expected_state in (AlarmControlPanelState.ARMED_AWAY, AlarmControlPanelState.ARMED_HOME):
+                self.hass.components.persistent_notification.async_create(
+                    "O alarme pode nao ter armado corretamente.\n\n"
+                    "Verifique se existem zonas abertas ou "
+                    "se o painel respondeu ao comando.",
+                    title="Aviso: Alarme nao confirmado",
+                    notification_id=f"alarm_verify_{self._device_id}"
+                )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from coordinator."""
+        if self._optimistic_state is not None:
+            real_state = self._get_real_state()
+            if real_state == self._optimistic_state:
+                self._optimistic_state = None
+        super()._handle_coordinator_update()
+
+    def _get_real_state(self):
+        """Get the real state from coordinator data (ignoring optimistic)."""
+        device = self.coordinator.get_device(self._device_id)
+
+        if device and device.get("is_triggered"):
+            return AlarmControlPanelState.TRIGGERED
+
+        partition_states = self._get_partition_states()
+        if not partition_states:
+            return AlarmControlPanelState.DISARMED
+
+        armed_partitions = set()
+        armed_states = {"armed_away", "armed_stay", "armed_home", "armed"}
+        for idx, status in partition_states.items():
+            status_lower = str(status).lower() if status else ""
+            if status_lower in armed_states:
+                armed_partitions.add(idx)
+
+        if not armed_partitions:
+            return AlarmControlPanelState.DISARMED
+
+        away_set = set(self._away_partitions)
+        home_set = set(self._home_partitions)
+        away_only = away_set - home_set
+
+        if away_set and away_set.issubset(armed_partitions):
+            return AlarmControlPanelState.ARMED_AWAY
+
+        if home_set and home_set.issubset(armed_partitions):
+            if not (away_only & armed_partitions):
+                return AlarmControlPanelState.ARMED_HOME
+
+        return AlarmControlPanelState.ARMED_HOME
+
     async def async_alarm_disarm(self, code: str = None) -> None:
         """Disarm all partitions that are currently armed."""
         _LOGGER.info(f"Unified alarm: Disarming armed partitions for device {self._device_id}")
@@ -717,10 +843,10 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
                         title="Erro ao Desarmar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_unified"
                     )
+                    return
 
-                await self.coordinator.async_request_refresh()
-                self._optimistic_state = None
-                self.async_write_ha_state()
+                # Don't clear optimistic state here - let SSE event update
+                self._schedule_optimistic_clear(AlarmControlPanelState.DISARMED)
 
         self.hass.async_create_task(_execute_disarm())
 
@@ -807,10 +933,10 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_unified"
                     )
+                    return
 
-                await self.coordinator.async_request_refresh()
-                self._optimistic_state = None
-                self.async_write_ha_state()
+                # Don't clear optimistic state here - let SSE event update
+                self._schedule_optimistic_clear(AlarmControlPanelState.ARMED_HOME)
 
         self.hass.async_create_task(_execute_arm_home())
 
@@ -879,9 +1005,9 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_unified"
                     )
+                    return
 
-                await self.coordinator.async_request_refresh()
-            self._optimistic_state = None
-            self.async_write_ha_state()
+                # Don't clear optimistic state here - let SSE event update
+                self._schedule_optimistic_clear(AlarmControlPanelState.ARMED_AWAY)
 
         self.hass.async_create_task(_execute_arm_away())

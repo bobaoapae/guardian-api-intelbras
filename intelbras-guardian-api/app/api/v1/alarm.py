@@ -11,6 +11,7 @@ from app.services.auth_service import auth_service
 from app.services.guardian_client import guardian_client
 from app.services.isecnet_client import isecnet_client
 from app.services.state_manager import state_manager
+from app.services.event_stream import event_stream
 from app.core.exceptions import (
     InvalidSessionError,
     AlarmOperationError,
@@ -492,6 +493,15 @@ async def arm_partition(
         # Determine new status based on mode
         new_status = "armed_away" if request.mode == ArmMode.AWAY else "armed_stay"
 
+        # Broadcast SSE event for instant HA state update
+        await event_stream.broadcast_event({
+            "event_type": "state_changed",
+            "device_id": device_id,
+            "partition_id": request.partition_id,
+            "new_status": new_status,
+            "source": "command",
+        }, event_type="alarm_event")
+
         return AlarmOperationResponse(
             success=True,
             device_id=device_id,
@@ -597,6 +607,15 @@ async def disarm_partition(
 
         # Clear device cache to force refresh
         await state_manager.delete_device_state(device_id)
+
+        # Broadcast SSE event for instant HA state update
+        await event_stream.broadcast_event({
+            "event_type": "state_changed",
+            "device_id": device_id,
+            "partition_id": request.partition_id,
+            "new_status": "disarmed",
+            "source": "command",
+        }, event_type="alarm_event")
 
         return AlarmOperationResponse(
             success=True,

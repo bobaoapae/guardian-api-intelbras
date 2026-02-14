@@ -362,7 +362,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         },
                     )
                     await coordinator.async_request_refresh()
-                    return self.async_create_entry(title="", data={})
+                    return self.async_create_entry(title="", data=dict(self._entry.options))
                 else:
                     errors["base"] = "oauth_callback_failed"
             else:
@@ -456,7 +456,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 success = await coordinator.client.delete_device_password(self._selected_device_id)
                 if success:
                     await coordinator.async_request_refresh()
-                    return self.async_create_entry(title="", data={})
+                    return self.async_create_entry(title="", data=dict(self._entry.options))
                 else:
                     errors["base"] = "delete_failed"
             else:
@@ -469,7 +469,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     )
                     if success:
                         await coordinator.async_request_refresh()
-                        return self.async_create_entry(title="", data={})
+                        return self.async_create_entry(title="", data=dict(self._entry.options))
                     else:
                         errors["base"] = "save_failed"
                 else:
