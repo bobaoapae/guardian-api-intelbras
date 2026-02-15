@@ -54,6 +54,9 @@ class ISECNetClient:
         self._device_locks: Dict[int, asyncio.Lock] = {}  # Per-device operation locks
         self._keep_alive_task: Optional[asyncio.Task] = None
         self._running = False
+        # Cache protocol version per device: "v1" or "v2"
+        # Avoids retrying V2 every time when device only supports V1
+        self._device_protocol: Dict[int, str] = {}
 
     def _get_device_lock(self, device_id: int) -> asyncio.Lock:
         """Get or create a lock for a specific device."""
@@ -193,28 +196,59 @@ class ISECNetClient:
                     ip_receiver_port=ip_receiver_port
                 )
             else:
-                # Try V2 first (port 9009)
-                logger.info(f"Connecting to device {device_id} via Cloud V2 (MAC: {clean_mac})")
-                success, message = await protocol.connect(
-                    mac=clean_mac,
-                    password=password,
-                    device_id=str(device_id),
-                    force_v1=False
-                )
+                # Check cached protocol version for this device
+                cached_proto = self._device_protocol.get(device_id)
 
-                # If V2 fails with "Not connected", try V1 as fallback (port 9015)
-                if not success and "Not connected" in message:
-                    logger.info(f"V2 failed with 'Not connected', trying V1 fallback for device {device_id}")
-                    await protocol.disconnect()
-                    protocol = ISECNetProtocol()  # Create new protocol instance
+                if cached_proto == "v1":
+                    # Device known to use V1 — skip V2 attempt
+                    logger.info(f"Connecting to device {device_id} via Cloud V1 (cached) (MAC: {clean_mac})")
                     success, message = await protocol.connect(
                         mac=clean_mac,
                         password=password,
                         device_id=str(device_id),
                         force_v1=True
                     )
+                    if not success:
+                        # V1 failed — clear cache and retry with V2
+                        logger.info(f"Cached V1 failed for device {device_id}, clearing cache and trying V2")
+                        del self._device_protocol[device_id]
+                        await protocol.disconnect()
+                        protocol = ISECNetProtocol()
+                        success, message = await protocol.connect(
+                            mac=clean_mac,
+                            password=password,
+                            device_id=str(device_id),
+                            force_v1=False
+                        )
+                        if success:
+                            self._device_protocol[device_id] = "v2"
+                else:
+                    # Try V2 first (port 9009)
+                    logger.info(f"Connecting to device {device_id} via Cloud V2 (MAC: {clean_mac})")
+                    success, message = await protocol.connect(
+                        mac=clean_mac,
+                        password=password,
+                        device_id=str(device_id),
+                        force_v1=False
+                    )
+
                     if success:
-                        message = f"{message} (V1 fallback)"
+                        self._device_protocol[device_id] = "v2"
+                    elif "Not connected" in message:
+                        # V2 failed — try V1 fallback and cache it
+                        logger.info(f"V2 failed, trying V1 fallback for device {device_id}")
+                        await protocol.disconnect()
+                        protocol = ISECNetProtocol()
+                        success, message = await protocol.connect(
+                            mac=clean_mac,
+                            password=password,
+                            device_id=str(device_id),
+                            force_v1=True
+                        )
+                        if success:
+                            self._device_protocol[device_id] = "v1"
+                            logger.info(f"Device {device_id} cached as V1 protocol")
+                            message = f"{message} (V1 fallback)"
 
             if success:
                 self._connections[device_id] = DeviceConnection(
