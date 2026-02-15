@@ -930,8 +930,10 @@ class ISECNetProtocol:
         logger.debug(f"ISECNet V1 command response ({len(response)} bytes): {response.hex()}")
 
         # ISECNetResponse error codes that indicate failure
+        # NOTE: 0x00 is NOT included here — in status responses (46/96+ bytes),
+        # response[2]=0x00 means SUCCESS. The APK UNKNOWN_ERROR=0 is a Java enum
+        # default, not an actual error code sent by the panel.
         error_codes = {
-            0: "Unknown error",           # UNKNOWN_ERROR
             224: "Invalid package",       # INVALID_PACKAGE
             225: "Incorrect password",    # INCORRECT_PASSWORD
             226: "Invalid command",       # INVALID_COMMAND
@@ -944,24 +946,21 @@ class ISECNetProtocol:
             232: "Bypass - central activated",  # BYPASS_CENTRAL_ACTIVATED
         }
 
-        # For all responses with enough bytes, check for error codes first
-        # This ensures we don't treat error responses as success just because of length
-        if len(response) >= 3:
-            response_code = response[2]
-            if response_code in error_codes:
-                error_msg = error_codes[response_code]
-                logger.warning(f"ISECNet V1 command failed: {error_msg} (0x{response_code:02X})")
+        # Check status response formats FIRST (46-byte or 96+ byte responses
+        # contain response[2]=0x00 meaning success, not error)
+        # 46-byte response = partial status response = success
+        if len(response) == 46:
+            # Check for actual error codes even in 46-byte responses
+            if len(response) >= 3 and response[2] in error_codes:
+                error_msg = error_codes[response[2]]
+                logger.warning(f"ISECNet V1 command failed: {error_msg} (0x{response[2]:02X})")
                 return False, error_msg
 
-        # 46-byte response = partial status response = success (if no error code)
-        if len(response) == 46:
-            # Verify it starts with expected command echo (0xE9)
             if response[1] == 0xE9:
                 logger.debug("46-byte response (partial status) - command succeeded")
                 return True, "OK"
             else:
                 logger.warning(f"46-byte response but unexpected format: byte[1]=0x{response[1]:02X}")
-                # Still treat as success if no error code was found
                 return True, "OK"
 
         # 96+ bytes = complete status response = success
@@ -969,17 +968,21 @@ class ISECNetProtocol:
             logger.debug(f"{len(response)}-byte response (complete status) - treating as success")
             return True, "OK"
 
-        # For shorter responses, check the response code at bytes[2]
-        # Note: Error codes are already checked above, so if we get here with >= 3 bytes,
-        # it's either SUCCESS (254) or an unknown code
+        # For shorter responses, check error codes at bytes[2]
         if len(response) >= 3:
             response_code = response[2]
+            if response_code in error_codes:
+                error_msg = error_codes[response_code]
+                logger.warning(f"ISECNet V1 command failed: {error_msg} (0x{response_code:02X})")
+                return False, error_msg
             if response_code == 254:  # SUCCESS
                 return True, "OK"
-            else:
-                # Unknown response code - log but treat as success if not a known error
-                logger.debug(f"ISECNet V1 response code: 0x{response_code:02X} (not a known error)")
+            if response_code == 0:  # 0x00 = success in V1 protocol
+                logger.debug("Short response with 0x00 - treating as success")
                 return True, "OK"
+            # Unknown response code - treat as success
+            logger.debug(f"ISECNet V1 response code: 0x{response_code:02X} (not a known error)")
+            return True, "OK"
 
         return False, "Invalid response (too short)"
 
