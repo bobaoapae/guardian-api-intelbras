@@ -847,13 +847,22 @@ class ISECNetProtocol:
             logger.info("Siren is ACTIVE")
 
         # Parse zone/sector status
-        # Zone status bytes are at different positions depending on model
-        # For most models: data[1:7] (APK bytes[2:8]) = zone open status
+        # Log full hex data for debugging zone byte positions
+        logger.info(f"V1 status raw data ({len(data)} bytes): {bytes(data).hex()}")
+
+        # Zone open status bytes
+        # APK ISECNetParserHelper: zone data starts at bytes[3] (data[2])
+        # after command echo (data[0]=0xE9) and response code (data[1]=0x00)
+        # Each byte = 8 zones, bit set = zone open
         zones = []
-        zone_bytes_start = 1  # After command echo
-        zone_bytes_count = 6  # Typical for 48-zone models
+        zone_bytes_start = 2  # After command echo and response code
+        zone_bytes_count = 8  # 8 bytes = 64 zones max
 
         if len(data) > zone_bytes_start + zone_bytes_count:
+            zone_hex = bytes(data[zone_bytes_start:zone_bytes_start + zone_bytes_count]).hex()
+            logger.info(f"Zone bytes (data[{zone_bytes_start}:{zone_bytes_start + zone_bytes_count}]): {zone_hex}")
+
+            open_zones = []
             for byte_idx in range(zone_bytes_count):
                 zone_byte = data[zone_bytes_start + byte_idx]
                 for bit_idx in range(8):
@@ -865,6 +874,13 @@ class ISECNetProtocol:
                         "open": is_open,
                         "state": "open" if is_open else "closed"
                     })
+                    if is_open:
+                        open_zones.append(zone_num)
+
+            if open_zones:
+                logger.info(f"Open zones: {open_zones}")
+            else:
+                logger.info("All zones closed")
 
         status.zones = zones
 
