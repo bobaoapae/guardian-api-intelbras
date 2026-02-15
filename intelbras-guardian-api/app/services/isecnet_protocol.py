@@ -851,11 +851,11 @@ class ISECNetProtocol:
         logger.info(f"V1 status raw data ({len(data)} bytes): {bytes(data).hex()}")
 
         # Zone open status bytes
-        # APK ISECNetParserHelper: zone data starts at bytes[3] (data[2])
-        # after command echo (data[0]=0xE9) and response code (data[1]=0x00)
-        # Each byte = 8 zones, bit set = zone open
+        # data[1] serves dual purpose: response code (0x00=success) AND first zone byte
+        # (zones 0-7). Since successful responses always have 0x00 here, it works.
+        # Verified: data[5]=0x40 bit 6 → zone_num=38 (0-based) = Zona 39 in Guardian app ✓
         zones = []
-        zone_bytes_start = 2  # After command echo and response code
+        zone_bytes_start = 1  # After command echo (data[0]=0xE9)
         zone_bytes_count = 8  # 8 bytes = 64 zones max
 
         if len(data) > zone_bytes_start + zone_bytes_count:
