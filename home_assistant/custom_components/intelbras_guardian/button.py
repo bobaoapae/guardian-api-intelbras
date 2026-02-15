@@ -53,12 +53,14 @@ class GuardianSirenOffButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = "Desligar Sirene"
         self._attr_icon = "mdi:volume-off"
 
-        # Device info for HA device registry grouping
+        # Device info - must match identifiers used by alarm_control_panel
+        # (keyed by MAC address, not device_id)
+        device_mac = device.get("mac", "")
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, str(device_id))},
-            "name": device.get("description", f"Alarm {device_id}"),
+            "identifiers": {(DOMAIN, device_mac)},
+            "name": device.get("description", f"Intelbras Alarm {device_id}"),
             "manufacturer": "Intelbras",
-            "model": device.get("model", "Unknown"),
+            "model": device.get("model", "Guardian Alarm"),
         }
 
     async def async_press(self) -> None:
