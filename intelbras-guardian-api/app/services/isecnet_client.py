@@ -620,6 +620,49 @@ class ISECNetClient:
                     await self._disconnect_device(device_id)
                 return False, str(e)
 
+    async def turn_off_siren(
+        self,
+        device_id: int,
+        mac: str,
+        password: str,
+        use_ip_receiver: bool = False,
+        ip_receiver_addr: str = None,
+        ip_receiver_port: int = None,
+        ip_receiver_account: str = None
+    ) -> Tuple[bool, str]:
+        """
+        Turn off the alarm siren without changing arm state.
+
+        Args:
+            device_id: Device ID
+            mac: Device MAC address
+            password: Alarm panel password
+            use_ip_receiver: Use IP receiver instead of cloud
+            ip_receiver_addr: IP receiver server address
+            ip_receiver_port: IP receiver server port
+            ip_receiver_account: IP receiver account
+
+        Returns:
+            Tuple of (success, message)
+        """
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
+
+            try:
+                success, message = await conn.protocol.turn_off_siren()
+                return success, message
+            except Exception as e:
+                logger.error(f"Error turning off siren for device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
+
     def is_connected(self, device_id: int) -> bool:
         """Check if device is connected."""
         if device_id not in self._connections:

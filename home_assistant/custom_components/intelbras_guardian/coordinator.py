@@ -1,6 +1,7 @@
 """Data update coordinator for Intelbras Guardian."""
 import asyncio
 import logging
+import time
 from datetime import timedelta
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +37,10 @@ class GuardianCoordinator(DataUpdateCoordinator):
         self.client = client
         self.entry = entry
         self._last_event_id: Optional[int] = None
+
+        # Stale triggered state timeout (10 minutes)
+        self._triggered_timestamps: Dict[int, float] = {}
+        self._triggered_timeout = 600  # seconds
 
         # SSE listener
         self._sse_task: Optional[asyncio.Task] = None
@@ -296,6 +301,28 @@ class GuardianCoordinator(DataUpdateCoordinator):
                             elif "index" not in zone:
                                 zone["index"] = 0
                             all_zones.append(zone)
+
+            # Check for stale triggered state (10-minute timeout)
+            now = time.time()
+            for device_id, device in processed_devices.items():
+                is_triggered = device.get("is_triggered", False)
+                if is_triggered:
+                    if device_id not in self._triggered_timestamps:
+                        self._triggered_timestamps[device_id] = now
+                    elif now - self._triggered_timestamps[device_id] > self._triggered_timeout:
+                        _LOGGER.info(
+                            "Device %d triggered state timed out after %d seconds, clearing",
+                            device_id, self._triggered_timeout
+                        )
+                        device["is_triggered"] = False
+                        # Also clear partition-level triggered if any
+                        for partition in all_partitions:
+                            if partition.get("device_id") == device_id:
+                                if partition.get("status") == "triggered":
+                                    partition["status"] = device.get("arm_mode", "disarmed")
+                        del self._triggered_timestamps[device_id]
+                else:
+                    self._triggered_timestamps.pop(device_id, None)
 
             # Check for new events
             new_events = []

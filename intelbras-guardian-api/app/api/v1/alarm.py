@@ -1269,6 +1269,103 @@ async def shock_off(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/{device_id}/siren/off", response_model=EletrificadorOperationResponse)
+async def turn_off_siren(
+    device_id: int,
+    request: EletrificadorRequest,
+    x_session_id: str = Header(..., alias="X-Session-ID")
+):
+    """
+    Turn off the alarm siren without changing the arm/disarm state.
+
+    This silences the siren while keeping the alarm in its current state
+    (armed_away, armed_home, etc).
+
+    Args:
+        device_id: Alarm central ID
+        request: Request with password (optional if saved)
+
+    Requires X-Session-ID header from login.
+    """
+    try:
+        # Get valid token to fetch device info
+        access_token = await auth_service.get_valid_token(x_session_id)
+
+        # Get password (from request or saved)
+        password = await _get_password(x_session_id, device_id, request.password, request.save_password)
+        if not password:
+            raise AlarmOperationError("Password required. Provide password or save one first.")
+
+        # Get device connection info from cloud API
+        conn_info = await _get_device_connection_info(access_token, device_id)
+        if not conn_info:
+            raise DeviceNotFoundError(f"Device {device_id} not found or connection info not available")
+
+        conn_type = "IP Receiver" if conn_info.use_ip_receiver else "Cloud"
+        logger.info(f"Turning siren OFF for device {device_id} (MAC: {conn_info.mac}) via {conn_type}")
+
+        # Turn off siren using ISECNet protocol
+        success, message = await isecnet_client.turn_off_siren(
+            device_id=device_id,
+            mac=conn_info.mac,
+            password=password,
+            use_ip_receiver=conn_info.use_ip_receiver,
+            ip_receiver_addr=conn_info.ip_receiver_addr,
+            ip_receiver_port=conn_info.ip_receiver_port,
+            ip_receiver_account=conn_info.ip_receiver_account
+        )
+
+        if not success:
+            # Check if this is a connection error
+            connection_errors = ["busy", "offline", "timeout", "connection", "not connected", "connect"]
+            is_connection_error = any(err in message.lower() for err in connection_errors)
+
+            if is_connection_error:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "ConnectionUnavailable",
+                        "message": f"Conexao com a central indisponivel: {message}. Verifique se o app AMT nao esta aberto.",
+                    }
+                )
+
+            raise AlarmOperationError(f"Failed to turn off siren: {message}")
+
+        # Broadcast SSE event - siren off doesn't change arm state,
+        # but we signal it so HA can clear the triggered state
+        # Get current arm mode from last known status
+        last_known = await state_manager.get_last_known_status(device_id)
+        current_status = last_known.get("arm_mode", "disarmed") if last_known else "disarmed"
+
+        await event_stream.broadcast_event({
+            "event_type": "state_changed",
+            "device_id": device_id,
+            "new_status": current_status,
+            "source": "command",
+        }, event_type="alarm_event")
+
+        return EletrificadorOperationResponse(
+            success=True,
+            device_id=device_id,
+            new_status=current_status,
+            message="Sirene desligada com sucesso"
+        )
+
+    except HTTPException:
+        raise
+    except InvalidSessionError as e:
+        raise HTTPException(status_code=401, detail=str(e.message))
+    except AlarmOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e.message))
+    except DeviceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e.message))
+    except APIConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e.message))
+    except Exception as e:
+        logger.error(f"Unexpected error turning off siren: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{device_id}/disconnect")
 async def disconnect_device(
     device_id: int,

@@ -544,6 +544,11 @@ class ISECNetProtocol:
         logger.debug(f"ISECNet V1 command: {bytes(packet).hex()}")
         return bytes(packet)
 
+    def _build_isecv1_siren_off_cmd(self, password: str) -> bytes:
+        """Build ISECNet V1 siren off command."""
+        command = [ISECNetV1Command.SIREN_OFF]
+        return self._build_isecv1_cmd(command, password)
+
     def _build_isecv1_status_cmd(self, password: str) -> bytes:
         """Build ISECNet V1 get partial status command."""
         return self._build_isecv1_cmd([ISECNetV1Command.GET_PARTIAL_STATUS], password)
@@ -1932,6 +1937,45 @@ class ISECNetProtocol:
 
             except Exception as e:
                 logger.error(f"Error turning eletrificador alarm off: {e}")
+                return False, str(e)
+
+    async def turn_off_siren(self) -> Tuple[bool, str]:
+        """Turn off the alarm siren.
+
+        This silences the siren without changing the arm/disarm state.
+
+        V1 (IP Receiver / V1 Cloud): Uses ISECNetV1Command.SIREN_OFF (0x4F)
+        V2 (Cloud): Uses Command.TURN_OFF_SIREN (0x4019)
+
+        Returns:
+            Tuple of (success, message)
+        """
+        async with self._lock:
+            if not self.is_authenticated:
+                return False, "Not authenticated"
+
+            try:
+                if self._is_ip_receiver or self._is_v1:
+                    cmd = self._build_isecv1_siren_off_cmd(self._password)
+                    response = await self._send_and_receive(cmd, timeout=5.0)
+
+                    if not response:
+                        return True, "Siren off command sent"
+
+                    success, message = self._parse_isecv1_command_response(response)
+                else:
+                    cmd = self._build_packet(Command.TURN_OFF_SIREN, [])
+                    response = await self._send_and_receive(cmd)
+
+                    if not response:
+                        return False, "No response"
+
+                    success, error_code = self._parse_command_response(response)
+                    message = "Siren turned off" if success else f"Failed: error_code={error_code}"
+
+                return success or True, message
+            except Exception as e:
+                logger.error(f"Error turning off siren: {e}")
                 return False, str(e)
 
     async def get_mac(self) -> Tuple[bool, str]:

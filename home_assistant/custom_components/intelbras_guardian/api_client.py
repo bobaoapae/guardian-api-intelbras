@@ -379,6 +379,12 @@ class GuardianApiClient:
         )
         return result is not None and result.get("success", False)
 
+    async def turn_off_siren(self, device_id: int) -> Dict[str, Any]:
+        """Turn off siren for a device."""
+        return await self._request_with_error(
+            "POST", f"/api/v1/alarm/{device_id}/siren/off", {}
+        )
+
     async def eletrificador_alarm_deactivate(self, device_id: int) -> bool:
         """Deactivate electric fence alarm."""
         result = await self._request(
