@@ -780,9 +780,9 @@ async def get_alarm_status_auto(
             ip_receiver_account=conn_info.ip_receiver_account
         )
 
-        # Disconnect after getting status to free connection for other devices
-        # This is important when syncing multiple devices sequentially
-        await isecnet_client.disconnect(device_id)
+        # Keep connection alive for fast subsequent polls.
+        # The ISECNet client's keep-alive loop handles idle cleanup (5 min timeout).
+        # Only disconnect on failure (handled below).
 
         # If connection failed, try to return last known status
         if not success:
