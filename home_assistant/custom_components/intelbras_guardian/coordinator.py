@@ -42,6 +42,12 @@ class GuardianCoordinator(DataUpdateCoordinator):
         self._triggered_timestamps: Dict[int, float] = {}
         self._triggered_timeout = 600  # seconds
 
+        # Cloud API throttle: only fetch devices/events every N cycles
+        self._cloud_api_interval = 30  # seconds
+        self._cloud_api_counter = 0
+        self._cached_devices: Optional[List] = None
+        self._cached_events: Optional[List] = None
+
         # SSE listener
         self._sse_task: Optional[asyncio.Task] = None
         self._sse_stop_event: Optional[asyncio.Event] = None
@@ -140,28 +146,37 @@ class GuardianCoordinator(DataUpdateCoordinator):
                     "needs_reauth": True,
                 }
 
-            # Get devices
-            devices = await self.client.get_devices()
-            if not devices:
-                _LOGGER.warning("No devices found or session may be invalid")
-                # Stop SSE listener if session seems invalid
-                await self.stop_sse_listener()
-                return {
-                    "devices": {},
-                    "partitions": [],
-                    "zones": [],
-                    "events": [],
-                    "new_events": [],
-                    "last_event": None,
-                    "needs_reauth": True,
-                }
+            # Throttle cloud API calls (get_devices/get_events) to every
+            # _cloud_api_interval seconds, while ISECNet status polls every cycle
+            self._cloud_api_counter += 1
+            cloud_cycles = max(1, int(self._cloud_api_interval / self.update_interval.total_seconds()))
+            fetch_cloud = self._cached_devices is None or self._cloud_api_counter >= cloud_cycles
+
+            if fetch_cloud:
+                self._cloud_api_counter = 0
+                devices = await self.client.get_devices()
+                if not devices:
+                    _LOGGER.warning("No devices found or session may be invalid")
+                    await self.stop_sse_listener()
+                    return {
+                        "devices": {},
+                        "partitions": [],
+                        "zones": [],
+                        "events": [],
+                        "new_events": [],
+                        "last_event": None,
+                        "needs_reauth": True,
+                    }
+                self._cached_devices = devices
+                self._cached_events = await self.client.get_events(limit=20)
+            else:
+                devices = self._cached_devices
+
+            events = self._cached_events or []
 
             # Start SSE listener if not already running (for real-time events)
             if self._sse_task is None:
                 await self.start_sse_listener()
-
-            # Get events
-            events = await self.client.get_events(limit=20)
 
             # Process devices into a more usable format
             processed_devices = {}
