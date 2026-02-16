@@ -57,6 +57,9 @@ class ISECNetClient:
         # Cache protocol version per device: "v1" or "v2"
         # Avoids retrying V2 every time when device only supports V1
         self._device_protocol: Dict[int, str] = {}
+        # Cache model code per device (persists across reconnections)
+        # Allows using model-specific status command (0x5D) from the first poll
+        self._device_model_code: Dict[int, int] = {}
 
     def _get_device_lock(self, device_id: int) -> asyncio.Lock:
         """Get or create a lock for a specific device."""
@@ -353,9 +356,29 @@ class ISECNetClient:
             if not success or not conn:
                 return False, AlarmStatus(), "Not connected"
 
+            # Restore cached model code so first poll can use model-specific command
+            model_was_unknown = conn.protocol._model_code is None
+            if device_id in self._device_model_code and model_was_unknown:
+                conn.protocol._model_code = self._device_model_code[device_id]
+                model_was_unknown = False
+                logger.debug(f"Restored cached model_code={self._device_model_code[device_id]} for device {device_id}")
+
             try:
                 success, status = await conn.protocol.get_status()
                 if success:
+                    # Cache model code for future connections
+                    if conn.protocol._model_code is not None:
+                        self._device_model_code[device_id] = conn.protocol._model_code
+
+                    # If model was unknown and we just discovered a smart panel,
+                    # re-poll immediately with the correct command to get wireless data
+                    if model_was_unknown and conn.protocol._model_code in (52, 54):
+                        logger.info(f"Smart panel detected (model={conn.protocol._model_code}), "
+                                    f"re-polling with 0x5D for wireless data")
+                        success2, status2 = await conn.protocol.get_status()
+                        if success2:
+                            return True, status2, "OK"
+
                     return True, status, "OK"
                 else:
                     return False, AlarmStatus(), "Failed to get status"
@@ -693,6 +716,35 @@ class ISECNetClient:
                 return success, message
             except Exception as e:
                 logger.error(f"Error turning off siren for device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
+
+    async def get_complete_status_raw(
+        self,
+        device_id: int,
+        mac: str,
+        password: str,
+        use_ip_receiver: bool = False,
+        ip_receiver_addr: str = None,
+        ip_receiver_port: int = None,
+        ip_receiver_account: str = None
+    ) -> Tuple[bool, str]:
+        """Get complete status as raw hex (debug)."""
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
+
+            try:
+                success, hex_str = await conn.protocol.get_complete_status_raw()
+                return success, hex_str
+            except Exception as e:
+                logger.error(f"Error getting complete status for device {device_id}: {e}")
                 async with self._lock:
                     await self._disconnect_device(device_id)
                 return False, str(e)

@@ -55,7 +55,9 @@ class AlarmOperation(IntEnum):
 class ISECNetV1Command(IntEnum):
     """ISECNet V1 command codes (used after IP Receiver connection)."""
     ISEC_PROGRAM = 0xE9  # 233 - SDK_CTRL_LOAD_STORAGE
-    GET_PARTIAL_STATUS = 0x5A  # 90
+    GET_PARTIAL_STATUS = 0x5A  # 90 - Amt2018/Anm24Net (46 bytes)
+    GET_EXTENDED_STATUS = 0x5B  # 91 - Amt4010Smart (~96 bytes)
+    GET_SMART_STATUS = 0x5D  # 93 - Amt2018ESmart/Amt1000Smart (135+ bytes, includes wireless sensor data)
     GET_COMPLETE_STATUS = 0x53  # 83
     GET_COMPLETE_INFO = 0x49  # 73
     ACTIVATE_CENTRAL = 0x41  # 65 = 'A'
@@ -110,12 +112,26 @@ class AlarmStatus:
     shock_triggered: bool = False  # isEletricfierTriggered - fence triggered
     alarm_enabled: bool = False  # generalState - alarm on/off
     alarm_triggered: bool = False  # isInAlarm - alarm triggered
+    # Wireless sensor data (only for smart panels: AMT 2018 E Smart, AMT 1000 Smart)
+    model_code: Optional[int] = None
+    wireless_zones: List[int] = None      # Indices of wireless zones
+    zone_battery_low: List[int] = None    # Indices of zones with low battery
+    zone_signal: dict = None              # {zone_index: signal_value (0-10)}
+    zone_tamper: List[int] = None         # Indices of zones with tamper
 
     def __post_init__(self):
         if self.partitions is None:
             self.partitions = []
         if self.zones is None:
             self.zones = []
+        if self.wireless_zones is None:
+            self.wireless_zones = []
+        if self.zone_battery_low is None:
+            self.zone_battery_low = []
+        if self.zone_signal is None:
+            self.zone_signal = {}
+        if self.zone_tamper is None:
+            self.zone_tamper = []
 
 
 class ConnectionType(IntEnum):
@@ -153,6 +169,7 @@ class ISECNetProtocol:
         self._is_ip_receiver: bool = False  # True if using IP Receiver (ISECNet V1)
         self._is_v1: bool = False  # True if using V1 protocol (port 9015)
         self._partitions_enabled: Optional[bool] = None  # True if device has partitions enabled (from status)
+        self._model_code: Optional[int] = None  # Cached model code from status response
 
     @staticmethod
     def _checksum(data: List[int]) -> int:
@@ -553,6 +570,31 @@ class ISECNetProtocol:
         """Build ISECNet V1 get partial status command."""
         return self._build_isecv1_cmd([ISECNetV1Command.GET_PARTIAL_STATUS], password)
 
+    def _build_isecv1_complete_status_cmd(self, password: str) -> bytes:
+        """Build ISECNet V1 get complete status command."""
+        return self._build_isecv1_cmd([ISECNetV1Command.GET_COMPLETE_STATUS], password)
+
+    def _get_status_cmd_for_model(self, model_code: Optional[int]) -> int:
+        """Get the correct status command byte based on panel model.
+
+        From AMT Mobile V3 APK:
+        - Amt2018ESmart (52) / Amt1000Smart (54): CMD_STATUS = 0x5D (93) -> 135+ bytes with wireless sensor data
+        - Amt4010Smart (65): CMD_STATUS = 0x5B (91) -> ~96 bytes
+        - Amt2018 (24) / Anm24Net (36,37) / others: CMD_STATUS = 0x5A (90) -> 46 bytes
+        """
+        if model_code in (52, 54):  # AMT_2018_E_SMART, AMT_1000_SMART
+            return ISECNetV1Command.GET_SMART_STATUS
+        elif model_code == 65:  # AMT_4010_SMART
+            return ISECNetV1Command.GET_EXTENDED_STATUS
+        else:
+            return ISECNetV1Command.GET_PARTIAL_STATUS
+
+    def _build_isecv1_model_status_cmd(self, password: str, model_code: Optional[int] = None) -> bytes:
+        """Build ISECNet V1 status command appropriate for the panel model."""
+        cmd_byte = self._get_status_cmd_for_model(model_code)
+        logger.info(f"Using status command 0x{cmd_byte:02X} for model_code={model_code}")
+        return self._build_isecv1_cmd([cmd_byte], password)
+
     def _build_isecv1_arm_cmd(self, password: str, partition_index: Optional[int] = None, stay: bool = False, include_partition: bool = True) -> bytes:
         """Build ISECNet V1 arm command.
 
@@ -719,6 +761,7 @@ class ISECNetProtocol:
 
         # Model code at data[19] (APK bytes[20])
         model_code = data[19]
+        self._model_code = model_code  # Cache for extended status commands
         status.model = self._get_model_name(model_code)
         logger.debug(f"Model code: 0x{model_code:02X} ({model_code}) = {status.model}")
 
@@ -883,6 +926,59 @@ class ISECNetProtocol:
                 logger.info("All zones closed")
 
         status.zones = zones
+
+        # Extended wireless sensor data (AMT 2018 E Smart / AMT 1000 Smart: 0x5D response)
+        if len(data) > 134:
+            status.model_code = model_code
+
+            # Parse wireless device bitmap (data[63:69], 6 bytes = 48 zones)
+            wireless_zones = []
+            for byte_idx in range(6):
+                byte_val = data[63 + byte_idx]
+                for bit_idx in range(8):
+                    zone_num = byte_idx * 8 + bit_idx
+                    if byte_val & (1 << bit_idx):
+                        wireless_zones.append(zone_num)
+            status.wireless_zones = wireless_zones
+
+            # Parse battery low bitmap (data[81:87], 6 bytes = 48 zones)
+            battery_low = []
+            for byte_idx in range(6):
+                byte_val = data[81 + byte_idx]
+                for bit_idx in range(8):
+                    zone_num = byte_idx * 8 + bit_idx
+                    if byte_val & (1 << bit_idx):
+                        battery_low.append(zone_num)
+            status.zone_battery_low = battery_low
+
+            # Parse tamper bitmap (data[69:75], 6 bytes)
+            tamper_zones = []
+            for byte_idx in range(6):
+                byte_val = data[69 + byte_idx]
+                for bit_idx in range(8):
+                    zone_num = byte_idx * 8 + bit_idx
+                    if byte_val & (1 << bit_idx):
+                        tamper_zones.append(zone_num)
+            status.zone_tamper = tamper_zones
+
+            # Parse signal strength (data[107:], 1 byte per wireless zone, scale 0-10)
+            zone_signal = {}
+            for i, zone_idx in enumerate(wireless_zones):
+                signal_offset = 107 + i
+                if signal_offset < len(data):
+                    zone_signal[zone_idx] = data[signal_offset]
+            status.zone_signal = zone_signal
+
+            logger.info(f"Extended status: wireless_zones={wireless_zones}, "
+                        f"battery_low={battery_low}, tamper={tamper_zones}")
+
+            # Enrich zone entries with wireless data
+            for zone in status.zones:
+                idx = zone["index"]
+                zone["is_wireless"] = idx in wireless_zones
+                zone["battery_low"] = idx in battery_low
+                zone["signal"] = zone_signal.get(idx)
+                zone["tamper"] = idx in tamper_zones
 
         logger.info(f"Parsed status: model={status.model}, armed={status.is_armed}, "
                    f"mode={status.arm_mode}, triggered={status.is_triggered}")
@@ -1554,6 +1650,49 @@ class ISECNetProtocol:
         async with self._lock:
             await self._cleanup_connection()
 
+    async def get_complete_status_raw(self) -> Tuple[bool, str]:
+        """Get complete/extended status as raw hex string (for debugging).
+
+        Uses model-specific status command:
+        - AMT 2018 E Smart / AMT 1000 Smart: 0x5D (135+ bytes with wireless sensor data)
+        - AMT 4010 Smart: 0x5B (~96 bytes)
+        - Others: 0x5A (46 bytes partial status)
+
+        Returns:
+            Tuple of (success, hex_string)
+        """
+        async with self._lock:
+            if not self.is_authenticated:
+                return False, "Not authenticated"
+
+            try:
+                if self._is_ip_receiver or self._is_v1:
+                    cmd = self._build_isecv1_model_status_cmd(self._password, self._model_code)
+                    response = await self._send_and_receive(cmd, timeout=5.0)
+
+                    if not response:
+                        return False, "No response"
+
+                    hex_str = response.hex()
+                    cmd_used = self._get_status_cmd_for_model(self._model_code)
+                    logger.info(f"Model status raw (cmd=0x{cmd_used:02X}, model={self._model_code}, {len(response)} bytes): {hex_str}")
+                    return True, hex_str
+                else:
+                    # V2 uses the same status command
+                    cmd = self._build_status_cmd()
+                    response = await self._send_and_receive(cmd)
+
+                    if not response:
+                        return False, "No response"
+
+                    hex_str = response.hex()
+                    logger.info(f"V2 Complete status raw ({len(response)} bytes): {hex_str}")
+                    return True, hex_str
+
+            except Exception as e:
+                logger.error(f"Error getting complete status: {e}")
+                return False, str(e)
+
     async def get_status(self) -> Tuple[bool, AlarmStatus]:
         """Get alarm panel status.
 
@@ -1570,7 +1709,7 @@ class ISECNetProtocol:
                     # Used for both IP Receiver and V1 Cloud connections
                     mode = "IP Receiver" if self._is_ip_receiver else "V1 Cloud"
                     logger.debug(f"Getting status using ISECNet V1 ({mode} mode)")
-                    cmd = self._build_isecv1_status_cmd(self._password)
+                    cmd = self._build_isecv1_model_status_cmd(self._password, self._model_code)
                     response = await self._send_and_receive(cmd, retries=1, retry_delay=0.5)
 
                     if not response:

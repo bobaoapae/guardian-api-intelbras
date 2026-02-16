@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from typing import Any, Optional
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -24,6 +24,8 @@ async def async_setup_entry(
     coordinator: GuardianCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     entities = []
+    # Track which wireless signal sensors have been created (by unique_id)
+    created_signal_sensors: set[str] = set()
 
     # Add a last event sensor for each device
     if coordinator.data:
@@ -37,7 +39,48 @@ async def async_setup_entry(
                 )
             )
 
+        # Add wireless signal sensor for each wireless zone already known
+        for zone in coordinator.data.get("zones", []):
+            if zone.get("is_wireless"):
+                uid = f"{zone.get('device_mac', '')}_zone_{zone.get('index', 0)}_signal"
+                created_signal_sensors.add(uid)
+                entities.append(
+                    GuardianWirelessSignalSensor(
+                        coordinator,
+                        zone["device_id"],
+                        zone.get("index", 0),
+                        zone.get("device_mac", ""),
+                    )
+                )
+
     async_add_entities(entities)
+
+    # Listen for coordinator updates to dynamically add wireless signal sensors
+    # (wireless data may not be available on the first poll)
+    def _check_new_wireless_zones() -> None:
+        if not coordinator.data:
+            return
+        new_entities = []
+        for zone in coordinator.data.get("zones", []):
+            if zone.get("is_wireless"):
+                uid = f"{zone.get('device_mac', '')}_zone_{zone.get('index', 0)}_signal"
+                if uid not in created_signal_sensors:
+                    created_signal_sensors.add(uid)
+                    new_entities.append(
+                        GuardianWirelessSignalSensor(
+                            coordinator,
+                            zone["device_id"],
+                            zone.get("index", 0),
+                            zone.get("device_mac", ""),
+                        )
+                    )
+        if new_entities:
+            _LOGGER.info("Adding %d new wireless signal sensors", len(new_entities))
+            async_add_entities(new_entities)
+
+    entry.async_on_unload(
+        coordinator.async_add_listener(_check_new_wireless_zones)
+    )
 
 
 class GuardianLastEventSensor(CoordinatorEntity, SensorEntity):
@@ -114,4 +157,71 @@ class GuardianLastEventSensor(CoordinatorEntity, SensorEntity):
                     "partition_id": last_event.get("partition_id"),
                     "device_id": last_event.get("device_id"),
                 }
+        return {}
+
+
+class GuardianWirelessSignalSensor(CoordinatorEntity, SensorEntity):
+    """Sensor showing wireless zone signal strength (0-10)."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:signal"
+    _attr_native_unit_of_measurement = "/10"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: GuardianCoordinator,
+        device_id: int,
+        zone_index: int,
+        device_mac: str,
+    ):
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._zone_index = zone_index
+        self._device_mac = device_mac
+
+        self._attr_unique_id = f"{device_mac}_zone_{zone_index}_signal"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        zone = self.coordinator.get_zone(self._device_id, self._zone_index)
+        zone_name = f"Zona {self._zone_index + 1:02d}"
+        if zone:
+            zone_name = zone.get("name", zone_name)
+        return f"{zone_name} Signal"
+
+    @property
+    def device_info(self):
+        """Return device info."""
+        device = self.coordinator.get_device(self._device_id)
+        if device:
+            return {
+                "identifiers": {(DOMAIN, self._device_mac)},
+                "name": device.get("description", f"Intelbras Alarm {self._device_id}"),
+                "manufacturer": "Intelbras",
+                "model": device.get("model", "Guardian Alarm"),
+            }
+        return None
+
+    @property
+    def native_value(self) -> Optional[int]:
+        """Return the signal strength value (0-10)."""
+        zone = self.coordinator.get_zone(self._device_id, self._zone_index)
+        if zone:
+            return zone.get("signal_strength")
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra state attributes."""
+        zone = self.coordinator.get_zone(self._device_id, self._zone_index)
+        if zone:
+            return {
+                "zone_index": self._zone_index,
+                "is_wireless": zone.get("is_wireless", False),
+                "battery_low": zone.get("battery_low", False),
+                "tamper": zone.get("tamper", False),
+            }
         return {}

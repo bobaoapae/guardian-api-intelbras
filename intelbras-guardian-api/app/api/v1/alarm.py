@@ -76,6 +76,10 @@ class ZoneStatusInfo(BaseModel):
     name: str = Field(..., description="Zone name (e.g., 'Zona 01')")
     is_open: bool = Field(default=False, description="Whether zone is open/triggered")
     is_bypassed: bool = Field(default=False, description="Whether zone is bypassed")
+    is_wireless: bool = Field(default=False, description="Whether zone has a wireless sensor")
+    battery_low: bool = Field(default=False, description="Whether wireless sensor has low battery")
+    signal_strength: Optional[int] = Field(None, description="Wireless signal strength (0-10, None if not wireless)")
+    tamper: bool = Field(default=False, description="Whether zone has tamper alert")
 
 
 class AlarmStatusResponse(BaseModel):
@@ -698,6 +702,21 @@ async def get_alarm_status(
             for p in status.partitions
         ]
 
+        # Convert zones to response format
+        zones = [
+            ZoneStatusInfo(
+                index=z["index"],
+                name=f"Zona {z['index'] + 1:02d}",
+                is_open=z.get("open", False),
+                is_bypassed=z.get("bypassed", False),
+                is_wireless=z.get("is_wireless", False),
+                battery_low=z.get("battery_low", False),
+                signal_strength=z.get("signal"),
+                tamper=z.get("tamper", False),
+            )
+            for z in status.zones
+        ]
+
         return AlarmStatusResponse(
             device_id=device_id,
             model=status.model,
@@ -707,6 +726,7 @@ async def get_alarm_status(
             is_triggered=status.is_triggered,
             partitions=partitions,
             partitions_enabled=status.partitions_enabled,
+            zones=zones,
             message="Status retrieved successfully",
             # Eletrificador-specific fields
             is_eletrificador=status.is_eletrificador,
@@ -803,7 +823,11 @@ async def get_alarm_status_auto(
                         index=z["index"],
                         name=z.get("name", f"Zona {z['index'] + 1:02d}"),
                         is_open=z.get("is_open", False),
-                        is_bypassed=z.get("is_bypassed", False)
+                        is_bypassed=z.get("is_bypassed", False),
+                        is_wireless=z.get("is_wireless", False),
+                        battery_low=z.get("battery_low", False),
+                        signal_strength=z.get("signal_strength"),
+                        tamper=z.get("tamper", False),
                     )
                     for z in last_known.get("zones", [])
                 ]
@@ -851,7 +875,11 @@ async def get_alarm_status_auto(
                 index=z["index"],
                 name=f"Zona {z['index'] + 1:02d}",
                 is_open=z.get("open", False),
-                is_bypassed=z.get("bypassed", False)
+                is_bypassed=z.get("bypassed", False),
+                is_wireless=z.get("is_wireless", False),
+                battery_low=z.get("battery_low", False),
+                signal_strength=z.get("signal"),
+                tamper=z.get("tamper", False),
             )
             for z in status.zones
         ]
@@ -866,7 +894,12 @@ async def get_alarm_status_auto(
             "is_triggered": status.is_triggered,
             "partitions": [{"index": p.index, "state": p.state} for p in partitions],
             "partitions_enabled": status.partitions_enabled,
-            "zones": [{"index": z.index, "name": z.name, "is_open": z.is_open, "is_bypassed": z.is_bypassed} for z in zones],
+            "zones": [{
+                "index": z.index, "name": z.name, "is_open": z.is_open,
+                "is_bypassed": z.is_bypassed, "is_wireless": z.is_wireless,
+                "battery_low": z.battery_low, "signal_strength": z.signal_strength,
+                "tamper": z.tamper,
+            } for z in zones],
             "is_eletrificador": status.is_eletrificador,
             "shock_enabled": status.shock_enabled,
             "shock_triggered": status.shock_triggered,
@@ -1363,6 +1396,123 @@ async def turn_off_siren(
         raise HTTPException(status_code=503, detail=str(e.message))
     except Exception as e:
         logger.error(f"Unexpected error turning off siren: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{device_id}/debug/complete-status")
+async def get_complete_status_debug(
+    device_id: int,
+    x_session_id: str = Header(..., alias="X-Session-ID")
+):
+    """
+    Debug endpoint: get complete status as raw hex.
+
+    Returns the raw hex bytes from GET_COMPLETE_STATUS (0x53) command.
+    Use this to analyze byte positions for wireless sensor data (battery, signal).
+    """
+    try:
+        access_token = await auth_service.get_valid_token(x_session_id)
+
+        password = await state_manager.get_device_password(x_session_id, str(device_id))
+        if not password:
+            raise AlarmOperationError("No saved password for this device.")
+
+        conn_info = await _get_device_connection_info(access_token, device_id)
+        if not conn_info:
+            raise DeviceNotFoundError(f"Device {device_id} not found")
+
+        # Also get partial status for comparison
+        partial_success, partial_status, _ = await isecnet_client.get_status(
+            device_id=device_id,
+            mac=conn_info.mac,
+            password=password,
+            use_ip_receiver=conn_info.use_ip_receiver,
+            ip_receiver_addr=conn_info.ip_receiver_addr,
+            ip_receiver_port=conn_info.ip_receiver_port,
+            ip_receiver_account=conn_info.ip_receiver_account
+        )
+
+        # Get complete status
+        success, hex_str = await isecnet_client.get_complete_status_raw(
+            device_id=device_id,
+            mac=conn_info.mac,
+            password=password,
+            use_ip_receiver=conn_info.use_ip_receiver,
+            ip_receiver_addr=conn_info.ip_receiver_addr,
+            ip_receiver_port=conn_info.ip_receiver_port,
+            ip_receiver_account=conn_info.ip_receiver_account
+        )
+
+        if not success:
+            raise AlarmOperationError(f"Failed: {hex_str}")
+
+        # Format hex in groups for readability
+        raw_bytes = bytes.fromhex(hex_str)
+        formatted = " ".join(f"{b:02x}" for b in raw_bytes)
+        # Also show with byte index annotations
+        annotated = []
+        for i, b in enumerate(raw_bytes):
+            annotated.append(f"[{i:3d}] 0x{b:02X} ({b:3d})")
+
+        # Determine which command was used based on model
+        model_name = partial_status.model if partial_success else "unknown"
+        cmd_map = {
+            "AMT_2018_E_SMART": ("GET_SMART_STATUS (0x5D)", 93),
+            "AMT_1000_SMART": ("GET_SMART_STATUS (0x5D)", 93),
+            "AMT_4010": ("GET_EXTENDED_STATUS (0x5B)", 91),
+        }
+        cmd_info = cmd_map.get(model_name, ("GET_PARTIAL_STATUS (0x5A)", 90))
+
+        # Annotate known byte positions for AMT 2018 E Smart (0x5D response)
+        byte_map = {}
+        if len(raw_bytes) > 100:
+            byte_map = {
+                "1": "0xE9 command echo",
+                "2-7": "Zone open (48 zones, 6 bytes)",
+                "8-13": "Zone violated/alarm (48 zones)",
+                "14-19": "Zone bypassed (48 zones)",
+                "20": "Model code",
+                "21": "Firmware version",
+                "22": "Partition config",
+                "23": "Partition armed status",
+                "32": "Battery level byte",
+                "39": "Output/siren status",
+                "40-45": "Enabled zones (48 zones)",
+                "46-57": "Partition zone assignment",
+                "58-63": "Stay zones",
+                "64-69": "Wireless device present (bitmap, 48 zones)",
+                "70-75": "Zone tamper (bitmap, 48 zones)",
+                "76-81": "Zone in short (bitmap, 48 zones)",
+                "82-87": "ZONE BATTERY LOW (bitmap, 48 zones)",
+                "94": "Stay armed status",
+                "95": "User partition permission",
+                "97-99": "Zone supervision failure",
+                "100-107": "Wireless device model",
+                "108-115": "WIRELESS DEVICE SIGNAL",
+                "132-134": "Zone supervision mode",
+                "135": "Zone type",
+            }
+
+        return {
+            "device_id": device_id,
+            "model": model_name,
+            "command": cmd_info[0],
+            "command_byte": f"0x{cmd_info[1]:02X}",
+            "total_bytes": len(raw_bytes),
+            "hex_raw": hex_str,
+            "hex_formatted": formatted,
+            "bytes_annotated": annotated,
+            "byte_map": byte_map if byte_map else None,
+        }
+
+    except InvalidSessionError as e:
+        raise HTTPException(status_code=401, detail=str(e.message))
+    except AlarmOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e.message))
+    except DeviceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e.message))
+    except Exception as e:
+        logger.error(f"Debug complete status error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

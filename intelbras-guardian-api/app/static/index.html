@@ -181,6 +181,32 @@
                                 <input type="text" x-model="zone.friendly_name"
                                        :placeholder="'Nome personalizado...'"
                                        style="flex: 1; padding: 8px;">
+                                <!-- Wireless indicators -->
+                                <template x-if="zone.is_wireless">
+                                    <div style="display: flex; gap: 5px; align-items: center; flex-shrink: 0;">
+                                        <!-- Signal strength bar -->
+                                        <span :title="'Sinal: ' + (zone.signal_strength ?? '?') + '/10'"
+                                              style="display: flex; align-items: flex-end; gap: 1px; height: 14px; cursor: help;">
+                                            <template x-for="i in 5" :key="i">
+                                                <span :style="'width: 3px; border-radius: 1px; background: ' +
+                                                    ((zone.signal_strength ?? 0) >= i * 2
+                                                        ? (zone.signal_strength >= 7 ? '#2ed573' : zone.signal_strength >= 4 ? '#ffa502' : '#ff4757')
+                                                        : '#333') +
+                                                    '; height: ' + (4 + i * 2) + 'px;'"></span>
+                                            </template>
+                                        </span>
+                                        <span style="font-size: 0.75em; color: #aaa; min-width: 20px;"
+                                              x-text="(zone.signal_strength ?? '?') + '/10'"></span>
+                                        <!-- Battery low -->
+                                        <span x-show="zone.battery_low"
+                                              title="Bateria fraca"
+                                              style="font-size: 0.85em; color: #ff4757; cursor: help;">BAT</span>
+                                        <!-- Tamper -->
+                                        <span x-show="zone.tamper"
+                                              title="Tamper: sensor violado"
+                                              style="font-size: 0.85em; color: #ffa502; cursor: help;">TMP</span>
+                                    </div>
+                                </template>
                                 <span class="badge" :class="zone.is_open ? '' : 'online'"
                                       :style="zone.is_open ? 'background: #ff4757;' : ''"
                                       x-text="zone.is_open ? 'ABERTA' : 'OK'"></span>
@@ -194,6 +220,22 @@
                     <button class="success" @click="saveZoneFriendlyNames" :disabled="loading">
                         Salvar
                     </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Debug Complete Status Modal -->
+        <div class="modal-overlay" x-show="showDebugModal" x-cloak>
+            <div class="modal" style="max-width: 800px;">
+                <h3 style="color: #666;">Debug: GET_COMPLETE_STATUS (0x53)</h3>
+                <div style="max-height: 500px; overflow-y: auto; margin: 15px 0;">
+                    <pre style="background: #0a0a1a; padding: 15px; border-radius: 5px; font-size: 0.8em; white-space: pre-wrap; word-break: break-all; color: #0f0; font-family: 'Courier New', monospace;" x-text="debugOutput"></pre>
+                </div>
+                <div class="buttons">
+                    <button @click="navigator.clipboard.writeText(debugOutput).then(() => showMessage('Copiado!', 'success'))" style="background: #666;">
+                        Copiar
+                    </button>
+                    <button @click="showDebugModal = false">Fechar</button>
                 </div>
             </div>
         </div>
@@ -427,6 +469,14 @@
                                                     :disabled="loading" title="Obter status em tempo real via ISECNet">
                                                 <span x-text="device.has_saved_password ? 'Status (Manual)' : 'Atualizar Status (ISECNet)'"></span>
                                             </button>
+                                            <!-- Debug: Complete Status -->
+                                            <template x-if="device.has_saved_password">
+                                                <button @click="getCompleteStatusDebug(device.id)"
+                                                        :disabled="loading" style="background: #666; font-size: 0.85em;"
+                                                        title="Debug: GET_COMPLETE_STATUS (0x53) - raw hex bytes">
+                                                    Debug: Status Completo
+                                                </button>
+                                            </template>
                                         </div>
                                         <template x-for="partition in device.partitions" :key="partition.id">
                                             <div class="partition">
@@ -578,6 +628,10 @@
                 showZoneEditorModal: false,
                 editingDeviceId: null,
                 editingZones: [],
+
+                // Debug modal state
+                showDebugModal: false,
+                debugOutput: '',
 
                 // API base URL
                 apiUrl: window.location.origin,
@@ -1659,6 +1713,11 @@
                             }
                         }
 
+                        // Cache zones from status (includes wireless data)
+                        if (data.zones && data.zones.length > 0) {
+                            device.status_zones = data.zones;
+                        }
+
                         // For eletrificadores, store separate shock and alarm states
                         if (this.isEletrificador(device) || data.is_eletrificador) {
                             // Store eletrificador-specific fields from API response
@@ -1836,6 +1895,22 @@
                         }
 
                         this.editingZones = data.zones || [];
+
+                        // Merge wireless data from cached status zones
+                        const device = this.devices.find(d => d.id === deviceId);
+                        if (device && device.status_zones) {
+                            for (const zone of this.editingZones) {
+                                const statusZone = device.status_zones.find(sz => sz.index === zone.index);
+                                if (statusZone) {
+                                    zone.is_open = statusZone.is_open;
+                                    zone.is_wireless = statusZone.is_wireless || false;
+                                    zone.battery_low = statusZone.battery_low || false;
+                                    zone.signal_strength = statusZone.signal_strength;
+                                    zone.tamper = statusZone.tamper || false;
+                                }
+                            }
+                        }
+
                         this.showZoneEditorModal = true;
                     } catch (e) {
                         this.showMessage(e.message, 'error');
@@ -1890,6 +1965,60 @@
                         return true;
                     }
                     return false;
+                },
+
+                // Debug: Get complete status raw hex
+                async getCompleteStatusDebug(deviceId) {
+                    this.loading = true;
+                    try {
+                        const response = await fetch(`${this.apiUrl}/api/v1/alarm/${deviceId}/debug/complete-status`, {
+                            headers: {
+                                'X-Session-ID': this.sessionId
+                            }
+                        });
+                        const data = await response.json();
+                        this.lastResponse = data;
+
+                        if (response.status === 401) {
+                            this.handleSessionExpired();
+                            return;
+                        }
+
+                        if (!response.ok) {
+                            throw new Error(data.detail || 'Falha ao obter status completo');
+                        }
+
+                        // Build formatted debug output
+                        let output = `=== ${data.command || 'STATUS'} - Device ${deviceId} ===\n`;
+                        output += `Model: ${data.model || 'unknown'}\n`;
+                        output += `Command: ${data.command_byte || '?'}\n`;
+                        output += `Total bytes: ${data.total_bytes}\n\n`;
+                        output += `Formatted: ${data.hex_formatted}\n\n`;
+
+                        if (data.byte_map) {
+                            output += `--- Byte Map (known positions) ---\n`;
+                            for (const [range, desc] of Object.entries(data.byte_map)) {
+                                output += `  [${range}] ${desc}\n`;
+                            }
+                            output += `\n`;
+                        }
+
+                        if (data.bytes_annotated && data.bytes_annotated.length > 0) {
+                            output += `--- Byte-by-Byte ---\n`;
+                            for (const line of data.bytes_annotated) {
+                                output += `  ${line}\n`;
+                            }
+                        }
+
+                        // Show in a modal-like alert or in the response area
+                        this.debugOutput = output;
+                        this.showDebugModal = true;
+                        this.showMessage(`Status completo recebido: ${data.total_bytes} bytes`, 'success');
+                    } catch (e) {
+                        this.showMessage(e.message, 'error');
+                    } finally {
+                        this.loading = false;
+                    }
                 }
             };
         }

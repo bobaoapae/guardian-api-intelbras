@@ -297,6 +297,11 @@ class GuardianCoordinator(DataUpdateCoordinator):
                             "name": zone.get("name", f"Zona {zone.get('index', 0) + 1:02d}"),
                             "is_open": zone.get("is_open", False),
                             "is_bypassed": zone.get("is_bypassed", False),
+                            # Wireless sensor data (only present for smart panels)
+                            "is_wireless": zone.get("is_wireless", False),
+                            "battery_low": zone.get("battery_low", False),
+                            "signal_strength": zone.get("signal_strength"),
+                            "tamper": zone.get("tamper", False),
                         })
                 else:
                     # Fallback: use zones from device data (cloud API)
