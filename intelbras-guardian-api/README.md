@@ -11,15 +11,19 @@ Middleware de API para integração de sistemas de alarme Intelbras Guardian com
 
 Este add-on fornece um middleware FastAPI que se comunica com centrais de alarme Intelbras Guardian usando:
 - Autenticação **OAuth 2.0** com Intelbras Cloud
-- **Protocolo ISECNet** para comunicação direta com centrais de alarme
+- **Protocolo ISECNet V1/V2** para comunicação direta com centrais de alarme
+- **Connection pooling** com keep-alive e reconexão automática
 
 ## Funcionalidades
 
-- Status do alarme em tempo real (armar/desarmar, disparado, zonas)
+- Status do alarme em tempo real (polling 1s via ISECNet com conexão persistente)
 - Armar/Desarmar partições (modos ausente e em casa)
 - Monitoramento de zonas com nomes amigáveis personalizados
+- Sensores wireless em painéis smart (bateria, sinal, tamper)
 - Controle de eletrificador (cerca elétrica)
-- Histórico de eventos
+- Desligar sirene
+- Detecção de indisponibilidade de conexão (entidades ficam "Unavailable" no HA)
+- Histórico de eventos + SSE para eventos em tempo real
 - Web UI para configuração e testes
 
 ## Instalação

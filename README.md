@@ -65,33 +65,38 @@ Este projeto implementa uma arquitetura em 3 camadas:
 │                  HOME ASSISTANT (Integração HACS)               │
 │                                                                 │
 │  - Config Flow (host:porta manual)                              │
-│  - Coordinator (polling 30s)                                    │
+│  - Coordinator (polling 1s ISECNet, ~30s Cloud API)             │
+│  - SSE listener para eventos em tempo real                      │
 │  - Entidades:                                                   │
-│    - alarm_control_panel (uma por partição)                     │
-│    - binary_sensor (um por zona)                                │
-│    - sensor (último evento)                                     │
+│    - alarm_control_panel (por partição + alarme unificado)      │
+│    - binary_sensor (zonas + bateria de sensores wireless)       │
+│    - sensor (último evento + sinal wireless)                    │
 │    - switch (choque/alarme do eletrificador)                    │
+│    - button (desligar sirene)                                   │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ HTTP REST
+                            │ HTTP REST + SSE
 ┌───────────────────────────▼─────────────────────────────────────┐
 │                  FASTAPI MIDDLEWARE (Container)                 │
 │                                                                 │
 │  - Autenticação OAuth 2.0 com Intelbras Cloud                   │
 │  - Refresh automático de token                                  │
 │  - Protocolo ISECNet (comunicação direta com a central)         │
-│  - Cache e gerenciamento de estado                              │
+│  - Connection pooling com keep-alive (idle timeout 5min)        │
+│  - Reconexão automática em falha de conexão                     │
+│  - Cache e gerenciamento de estado persistente                  │
+│  - Detecção de indisponibilidade (connection_unavailable)       │
 │  - Gerenciamento de nomes amigáveis das zonas                   │
 │  - Armazenamento de senha do dispositivo para auto-sync         │
 │  - Web UI para testes e gerenciamento                           │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ HTTPS + ISECNet
+                            │ HTTPS + ISECNet (TCP)
 ┌───────────────────────────▼─────────────────────────────────────┐
 │  INFRAESTRUTURA INTELBRAS                                       │
 │                                                                 │
 │  ┌─────────────────────┐    ┌─────────────────────────────────┐│
-│  │  API Cloud          │    │  Receptor IP (Relay)            ││
-│  │  api-guardian...    │    │  Encaminha comandos ISECNet     ││
-│  │  :8443              │    │  para a central de alarme       ││
+│  │  API Cloud          │    │  Servidores ISECNet             ││
+│  │  api-guardian...    │    │  V2: amt8000:9009/80            ││
+│  │  :8443              │    │  V1: amt:9015                   ││
 │  └──────────┬──────────┘    └─────────────┬───────────────────┘│
 │             │                             │                     │
 │             └──────────────┬──────────────┘                     │
@@ -101,6 +106,7 @@ Este projeto implementa uma arquitetura em 3 camadas:
 │  │                                                             ││
 │  │  - Partições (áreas que podem ser armadas independentemente)││
 │  │  - Zonas (sensores: portas, janelas, movimento, etc)        ││
+│  │  - Sensores wireless (bateria, sinal, tamper)               ││
 │  │  - Protocolo ISECNet V1/V2 para comunicação                 ││
 │  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
@@ -115,61 +121,87 @@ Este projeto implementa uma arquitetura em 3 camadas:
 2. **Descoberta de Dispositivos**: FastAPI consulta a API do Intelbras Cloud para listar centrais de alarme registradas com suas partições e zonas.
 
 3. **Status em Tempo Real (Protocolo ISECNet)**:
-   - FastAPI conecta ao Receptor IP da Intelbras
-   - Envia comandos ISECNet diretamente para a central de alarme
-   - Recebe status em tempo real: estado armado/desarmado, zonas abertas, alarmes disparados
-   - Isso evita a latência da nuvem para atualizações de status
+   - FastAPI conecta aos servidores ISECNet da Intelbras (Cloud V2/V1 ou IP Receiver)
+   - Mantém conexão TCP persistente com connection pooling (idle timeout 5min)
+   - Polling a cada 1s para status em tempo real: armado/desarmado, zonas, alarmes
+   - Reconexão automática em caso de falha de conexão
+   - Quando a conexão cai, retorna último estado conhecido com flag `connection_unavailable`
+   - Entidades no HA ficam "Indisponível" até a conexão ser restabelecida
 
 4. **Comandos de Armar/Desarmar**:
    - Home Assistant envia comando para FastAPI
-   - FastAPI envia comando ISECNet via Receptor IP para a central
+   - FastAPI envia comando ISECNet via conexão persistente para a central
    - Central executa o comando e retorna resultado
-   - Status é atualizado imediatamente
+   - Status é atualizado imediatamente (estado otimista + confirmação)
 
 5. **Monitoramento de Zonas**:
    - ISECNet fornece status em tempo real das zonas (aberta/fechada)
+   - Painéis smart (AMT 2018 E SMART): bateria, sinal e tamper de sensores wireless
    - Nomes amigáveis podem ser atribuídos às zonas via FastAPI
    - Sensores binários no Home Assistant refletem o estado das zonas
+
+6. **Eventos em Tempo Real (SSE)**:
+   - Listener SSE para receber eventos do alarme instantaneamente
+   - Eventos disparados como `intelbras_guardian_alarm_event` no HA
+   - Permite automações reativas (ex: notificar ao disparar alarme)
 
 ### Protocolo ISECNet
 
 ISECNet é o protocolo proprietário da Intelbras para comunicação direta com centrais de alarme:
 
-- **Versão 1**: Comandos básicos (armar, desarmar, status)
-- **Versão 2**: Recursos estendidos (nomes de zonas, controle de PGM)
+- **Versão 2 (V2)**: Servidor `amt8000.intelbras.com.br` portas 9009/80 - recursos estendidos
+- **Versão 1 (V1)**: Servidor `amt.intelbras.com.br` porta 9015 - fallback para painéis legados
+- **IP Receiver**: Conexão direta via receptor IP local (alternativa ao cloud)
 
 O protocolo usa:
-- Conexão TCP via Receptor IP da Intelbras
+- Conexão TCP persistente com connection pooling por dispositivo
+- Fallback automático V2 → V1 com cache de protocolo por dispositivo
+- Reconexão automática quando a conexão é perdida
 - Formato de pacote binário com validação CRC
 - Autenticação baseada em senha por dispositivo
-- Criptografia para dados sensíveis
+- Criptografia XOR para dados sensíveis
 
 ### Dispositivos Suportados
 
-- **Centrais de Alarme**: AMT 2008, AMT 2010, AMT 2018, AMT 4010, série ANM
+- **Centrais de Alarme**: AMT 2008, AMT 2010, AMT 2018, AMT 2018 E SMART, AMT 4010, série ANM
+- **Painéis Smart**: Suporte a sensores wireless (bateria, sinal, tamper) via comando 0x5D
 - **Eletrificadores**: ELC 5001, ELC 5002
 
 ## Funcionalidades
 
 ### Painel de Controle de Alarme
-- Armar/desarmar partições
+- Armar/desarmar partições individuais ou via alarme unificado
 - Modos de arme: Ausente (total) e Em Casa (stay/perímetro)
-- Detecção de estado disparado
-- Status em tempo real via ISECNet
+- Alarme unificado com mapeamento configurável de partições por modo (Home/Away)
+- Detecção de estado disparado (com timeout automático de 10 min para estados stale)
+- Status em tempo real via ISECNet (polling 1s)
+- Estado otimista para feedback imediato na UI
+- Detecção de indisponibilidade: entidades ficam "Unavailable" quando a conexão com a central cai
 
 ### Sensores de Zona (Sensores Binários)
 - Status em tempo real aberto/fechado
 - Nomes amigáveis personalizáveis
 - Classe de dispositivo baseada no tipo de zona (porta, janela, movimento, fumaça, etc.)
 - Atributo de status de bypass
+- **Sensores wireless (painéis smart)**: bateria baixa (binary_sensor)
+
+### Sensores Wireless (Painéis Smart)
+- **Sinal wireless**: intensidade do sinal (0-10) por zona wireless
+- **Bateria baixa**: alerta quando bateria do sensor está fraca
+- **Tamper**: detecção de violação do sensor
+- Sensores adicionados dinamicamente quando painel smart é detectado
 
 ### Controle de Eletrificador (Switches)
 - **Switch de Choque**: Habilitar/desabilitar choque elétrico
 - **Switch de Alarme**: Armar/desarmar alarme da cerca
 
+### Botão Desligar Sirene
+- Desliga a sirene da central sem alterar o estado de arme
+
 ### Sensor de Evento
 - Informação do último evento
 - Atributos do histórico de eventos
+- Eventos em tempo real via SSE (Server-Sent Events)
 
 ## Início Rápido
 
@@ -304,8 +336,9 @@ guardian-api-intelbras/
 │   │   ├── services/                 # Lógica de negócio
 │   │   │   ├── guardian_client.py    # Cliente da API Intelbras Cloud
 │   │   │   ├── auth_service.py       # Autenticação OAuth 2.0
-│   │   │   ├── state_manager.py      # Gerenciamento de estado/cache
-│   │   │   └── isecnet_protocol.py   # Implementação ISECNet
+│   │   │   ├── state_manager.py      # Gerenciamento de estado/cache persistente
+│   │   │   ├── isecnet_protocol.py   # Protocolo ISECNet V1/V2 (baixo nível)
+│   │   │   └── isecnet_client.py     # Connection pooling, keep-alive, reconexão
 │   │   ├── api/v1/                   # Endpoints REST
 │   │   └── static/                   # Web UI
 │   ├── tests/                        # Testes
@@ -325,10 +358,11 @@ guardian-api-intelbras/
 │           ├── config_flow.py
 │           ├── coordinator.py
 │           ├── api_client.py
-│           ├── alarm_control_panel.py
-│           ├── binary_sensor.py
-│           ├── sensor.py
-│           ├── switch.py
+│           ├── alarm_control_panel.py  # Partições + alarme unificado
+│           ├── binary_sensor.py       # Zonas + bateria wireless
+│           ├── sensor.py              # Último evento + sinal wireless
+│           ├── switch.py              # Choque/alarme eletrificador
+│           ├── button.py              # Desligar sirene
 │           └── const.py
 └── docs/                             # Documentação
 ```
@@ -363,7 +397,7 @@ EVENT_POLL_INTERVAL=30
 - **Credenciais**: Nunca faça commit de arquivos `.env` com credenciais
 - **HTTPS**: Use um proxy reverso com SSL em produção
 - **CORS**: Restrinja `CORS_ORIGINS` apenas a domínios confiáveis
-- **Senhas de Dispositivo**: Armazenadas criptografadas em memória, não persistidas em disco
+- **Senhas de Dispositivo**: Armazenadas em `data/sessions.json` (persistidas em disco para sobreviver a reinícios). Proteja o acesso a este arquivo
 - **Logs**: Dados sensíveis (senhas, tokens) são automaticamente filtrados dos logs
 
 ## Solução de Problemas
@@ -381,6 +415,12 @@ EVENT_POLL_INTERVAL=30
 - Verifique se a senha do dispositivo está salva corretamente
 - Verifique se o dispositivo está online no app Intelbras
 - Verifique a conexão ISECNet nos logs do FastAPI
+
+### Entidades ficam "Indisponível" no Home Assistant
+- A conexão ISECNet com a central foi perdida
+- Verifique se o aplicativo AMT Mobile/AMT Remoto **não está aberto** (bloqueia a conexão ISECNet)
+- A API tenta reconectar automaticamente a cada polling cycle (1s)
+- Quando a conexão é restabelecida, as entidades voltam ao normal automaticamente
 
 ### Zonas mostrando status errado
 - Salve a senha do dispositivo para status em tempo real via ISECNet
