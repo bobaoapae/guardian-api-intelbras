@@ -105,6 +105,16 @@ class GuardianLastEventSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{device_mac}_last_event"
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available (connection to panel is working)."""
+        if not self.coordinator.last_update_success:
+            return False
+        device = self.coordinator.get_device(self._device_id)
+        if device and device.get("connection_unavailable", False):
+            return False
+        return True
+
+    @property
     def device_info(self):
         """Return device info."""
         device = self.coordinator.get_device(self._device_id)
@@ -182,6 +192,16 @@ class GuardianWirelessSignalSensor(CoordinatorEntity, SensorEntity):
         self._device_mac = device_mac
 
         self._attr_unique_id = f"{device_mac}_zone_{zone_index}_signal"
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available (connection to panel is working)."""
+        if not self.coordinator.last_update_success:
+            return False
+        device = self.coordinator.get_device(self._device_id)
+        if device and device.get("connection_unavailable", False):
+            return False
+        return True
 
     @property
     def name(self) -> str:

@@ -381,6 +381,10 @@ class ISECNetClient:
 
                     return True, status, "OK"
                 else:
+                    # Disconnect broken connection so next call triggers fresh reconnect
+                    logger.warning(f"Status failed for device {device_id}, disconnecting to force reconnect")
+                    async with self._lock:
+                        await self._disconnect_device(device_id)
                     return False, AlarmStatus(), "Failed to get status"
             except Exception as e:
                 logger.error(f"Error getting status for device {device_id}: {e}")

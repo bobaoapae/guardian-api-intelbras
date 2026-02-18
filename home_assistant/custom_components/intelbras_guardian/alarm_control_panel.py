@@ -135,6 +135,16 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
         self._attr_unique_id = f"{device_mac}_partition_{partition_id}"
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available (connection to panel is working)."""
+        if not self.coordinator.last_update_success:
+            return False
+        device = self.coordinator.get_device(self._device_id)
+        if device and device.get("connection_unavailable", False):
+            return False
+        return True
+
+    @property
     def name(self) -> str:
         """Return the name of the alarm."""
         partition = self.coordinator.get_partition(self._device_id, self._partition_id)
@@ -586,6 +596,16 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         # Entity attributes
         self._attr_unique_id = f"{device_mac}_unified_alarm"
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available (connection to panel is working)."""
+        if not self.coordinator.last_update_success:
+            return False
+        device = self.coordinator.get_device(self._device_id)
+        if device and device.get("connection_unavailable", False):
+            return False
+        return True
 
     @property
     def name(self) -> str:

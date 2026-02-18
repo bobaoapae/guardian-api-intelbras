@@ -78,6 +78,16 @@ class GuardianEletrificadorShockSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_icon = "mdi:flash"
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available (connection to panel is working)."""
+        if not self.coordinator.last_update_success:
+            return False
+        device = self.coordinator.get_device(self._device_id)
+        if device and device.get("connection_unavailable", False):
+            return False
+        return True
+
+    @property
     def device_info(self):
         """Return device info."""
         device = self.coordinator.get_device(self._device_id)
@@ -149,6 +159,16 @@ class GuardianEletrificadorAlarmSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_unique_id = f"{device_mac}_alarm"
         self._attr_name = "Alarme"
         self._attr_icon = "mdi:shield"
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available (connection to panel is working)."""
+        if not self.coordinator.last_update_success:
+            return False
+        device = self.coordinator.get_device(self._device_id)
+        if device and device.get("connection_unavailable", False):
+            return False
+        return True
 
     @property
     def device_info(self):
