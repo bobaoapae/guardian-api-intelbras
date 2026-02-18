@@ -356,6 +356,16 @@ class GuardianCoordinator(DataUpdateCoordinator):
                     e.get("id", 0) for e in events
                 ) if events else None
 
+            # Build lookup indexes for O(1) access by entities
+            zone_index = {}
+            for zone in all_zones:
+                key = (zone.get("device_id"), zone.get("index"))
+                zone_index[key] = zone
+            partition_index = {}
+            for partition in all_partitions:
+                key = (partition.get("device_id"), partition.get("id"))
+                partition_index[key] = partition
+
             return {
                 "devices": processed_devices,
                 "partitions": all_partitions,
@@ -363,6 +373,8 @@ class GuardianCoordinator(DataUpdateCoordinator):
                 "events": events,
                 "new_events": new_events,
                 "last_event": events[0] if events else None,
+                "_zone_index": zone_index,
+                "_partition_index": partition_index,
             }
 
         except Exception as err:
@@ -382,10 +394,9 @@ class GuardianCoordinator(DataUpdateCoordinator):
     ) -> Optional[Dict[str, Any]]:
         """Get a specific partition from cached data."""
         if self.data:
-            for partition in self.data.get("partitions", []):
-                if (partition.get("device_id") == device_id and
-                    partition.get("id") == partition_id):
-                    return partition
+            index = self.data.get("_partition_index")
+            if index:
+                return index.get((device_id, partition_id))
         return None
 
     def get_zone(
@@ -395,10 +406,9 @@ class GuardianCoordinator(DataUpdateCoordinator):
     ) -> Optional[Dict[str, Any]]:
         """Get a specific zone from cached data by index."""
         if self.data:
-            for zone in self.data.get("zones", []):
-                if (zone.get("device_id") == device_id and
-                    zone.get("index") == zone_index):
-                    return zone
+            index = self.data.get("_zone_index")
+            if index:
+                return index.get((device_id, zone_index))
         return None
 
     def get_zone_by_id(
@@ -408,6 +418,7 @@ class GuardianCoordinator(DataUpdateCoordinator):
     ) -> Optional[Dict[str, Any]]:
         """Get a specific zone from cached data by ID."""
         if self.data:
+            # zone_by_id is less common, fall back to linear scan
             for zone in self.data.get("zones", []):
                 if (zone.get("device_id") == device_id and
                     zone.get("id") == zone_id):
