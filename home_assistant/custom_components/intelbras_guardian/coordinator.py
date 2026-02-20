@@ -381,6 +381,46 @@ class GuardianCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"Error fetching data: {err}")
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
+    async def async_refresh_device(self, device_id: int) -> None:
+        """Refresh only a single device's status without touching other devices.
+
+        This avoids the problem where a full coordinator refresh rebuilds ALL
+        device data from scratch, potentially causing transient incorrect states
+        on unrelated devices (e.g., eletrificador refresh corrupting alarm state).
+        """
+        if not self.data:
+            return
+
+        device = self.data.get("devices", {}).get(device_id)
+        if not device or not device.get("has_saved_password"):
+            return
+
+        try:
+            status = await self.client.get_alarm_status_auto(device_id)
+            if not status:
+                return
+
+            # Update only this device's fields in-place
+            device["arm_mode"] = status.get("arm_mode")
+            device["is_armed"] = status.get("is_armed")
+            device["is_triggered"] = status.get("is_triggered")
+            device["connection_unavailable"] = status.get("connection_unavailable", False)
+            device["last_updated"] = status.get("last_updated")
+
+            # Eletrificador-specific fields
+            model = device.get("model", "").upper()
+            if "ELC" in model or "ELETRIFICADOR" in model:
+                device["shock_enabled"] = status.get("shock_enabled")
+                device["alarm_enabled"] = status.get("alarm_enabled")
+                device["shock_triggered"] = status.get("shock_triggered")
+                device["alarm_triggered"] = status.get("alarm_triggered")
+
+            # Notify entities that data changed (without rebuilding everything)
+            self.async_set_updated_data(self.data)
+
+        except Exception as e:
+            _LOGGER.debug(f"Could not refresh device {device_id}: {e}")
+
     def get_device(self, device_id: int) -> Optional[Dict[str, Any]]:
         """Get a specific device from cached data."""
         if self.data:

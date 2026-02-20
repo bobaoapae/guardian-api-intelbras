@@ -124,7 +124,7 @@ class GuardianEletrificadorShockSwitch(CoordinatorEntity, SwitchEntity):
         _LOGGER.info(f"Turning on shock for eletrificador {self._device_id}")
         success = await self.coordinator.client.eletrificador_shock_on(self._device_id)
         if success:
-            await self.coordinator.async_request_refresh()
+            await self.coordinator.async_refresh_device(self._device_id)
         else:
             _LOGGER.error("Failed to turn on shock")
 
@@ -133,7 +133,7 @@ class GuardianEletrificadorShockSwitch(CoordinatorEntity, SwitchEntity):
         _LOGGER.info(f"Turning off shock for eletrificador {self._device_id}")
         success = await self.coordinator.client.eletrificador_shock_off(self._device_id)
         if success:
-            await self.coordinator.async_request_refresh()
+            await self.coordinator.async_refresh_device(self._device_id)
         else:
             _LOGGER.error("Failed to turn off shock")
 
@@ -207,7 +207,7 @@ class GuardianEletrificadorAlarmSwitch(CoordinatorEntity, SwitchEntity):
         _LOGGER.info(f"Arming alarm for eletrificador {self._device_id}")
         success = await self.coordinator.client.eletrificador_alarm_activate(self._device_id)
         if success:
-            await self.coordinator.async_request_refresh()
+            await self.coordinator.async_refresh_device(self._device_id)
         else:
             _LOGGER.error("Failed to arm alarm")
 
@@ -216,6 +216,6 @@ class GuardianEletrificadorAlarmSwitch(CoordinatorEntity, SwitchEntity):
         _LOGGER.info(f"Disarming alarm for eletrificador {self._device_id}")
         success = await self.coordinator.client.eletrificador_alarm_deactivate(self._device_id)
         if success:
-            await self.coordinator.async_request_refresh()
+            await self.coordinator.async_refresh_device(self._device_id)
         else:
             _LOGGER.error("Failed to disarm alarm")
