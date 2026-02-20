@@ -47,6 +47,14 @@ class DisarmRequest(BaseModel):
     save_password: bool = Field(default=False, description="Save password for future use")
 
 
+class BypassZoneRequest(BaseModel):
+    """Bypass zone request model."""
+    zone_indices: List[int] = Field(..., description="Zone indices (0-based) to bypass/unbypass")
+    bypass: bool = Field(default=True, description="True to bypass (anular), False to unbypass")
+    password: Optional[str] = Field(None, min_length=4, max_length=6, description="Alarm panel password (4-6 digits). If not provided, uses saved password.")
+    save_password: bool = Field(default=False, description="Save password for future use")
+
+
 class OpenZoneInfo(BaseModel):
     """Open zone information for error responses."""
     index: int = Field(..., description="Zone index (0-based)")
@@ -642,6 +650,92 @@ async def disarm_partition(
         raise HTTPException(status_code=503, detail=str(e.message))
     except Exception as e:
         logger.error(f"Unexpected error disarming: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{device_id}/bypass-zone", response_model=AlarmOperationResponse)
+async def bypass_zones(
+    device_id: int,
+    request: BypassZoneRequest,
+    x_session_id: str = Header(..., alias="X-Session-ID")
+):
+    """
+    Bypass (anular) or unbypass zones using ISECNet protocol.
+
+    Bypassed zones are ignored during arm, allowing the alarm to arm
+    even with open zones.
+
+    Args:
+        device_id: Alarm central ID
+        request: Bypass request with zone_indices and bypass flag
+
+    Requires X-Session-ID header from login.
+    """
+    try:
+        access_token = await auth_service.get_valid_token(x_session_id)
+
+        password = await _get_password(x_session_id, device_id, request.password, request.save_password)
+        if not password:
+            raise AlarmOperationError("Password required. Provide password or save one first.")
+
+        conn_info = await _get_device_connection_info(access_token, device_id)
+        if not conn_info:
+            raise DeviceNotFoundError(f"Device {device_id} not found or connection info not available")
+
+        conn_type = "IP Receiver" if conn_info.use_ip_receiver else "Cloud"
+        action = "Bypassing" if request.bypass else "Unbypassing"
+        logger.info(f"{action} zones {request.zone_indices} on device {device_id} (MAC: {conn_info.mac}) via {conn_type}")
+
+        success, message = await isecnet_client.bypass_zones(
+            device_id=device_id,
+            mac=conn_info.mac,
+            password=password,
+            zone_indices=request.zone_indices,
+            bypass=request.bypass,
+            use_ip_receiver=conn_info.use_ip_receiver,
+            ip_receiver_addr=conn_info.ip_receiver_addr,
+            ip_receiver_port=conn_info.ip_receiver_port,
+            ip_receiver_account=conn_info.ip_receiver_account
+        )
+
+        if not success:
+            connection_errors = ["busy", "offline", "timeout", "connection", "not connected", "connect"]
+            is_connection_error = any(err in message.lower() for err in connection_errors)
+
+            if is_connection_error:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "ConnectionUnavailable",
+                        "message": f"Conexao com a central indisponivel: {message}. Verifique se o app AMT nao esta aberto.",
+                    }
+                )
+
+            raise AlarmOperationError(f"Bypass failed: {message}")
+
+        # Clear device cache to force refresh
+        await state_manager.delete_device_state(device_id)
+
+        return AlarmOperationResponse(
+            success=True,
+            device_id=device_id,
+            partition_id=None,
+            new_status=None,
+            message=message
+        )
+
+    except HTTPException:
+        raise
+    except InvalidSessionError as e:
+        raise HTTPException(status_code=401, detail=str(e.message))
+    except AlarmOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e.message))
+    except DeviceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e.message))
+    except APIConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e.message))
+    except Exception as e:
+        logger.error(f"Unexpected error bypassing zones: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

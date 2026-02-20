@@ -1,6 +1,7 @@
 """Alarm control panel for Intelbras Guardian."""
 import asyncio
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from homeassistant.components.alarm_control_panel import (
@@ -25,6 +26,21 @@ from .const import (
 from .coordinator import GuardianCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _notify(hass: HomeAssistant, message: str, title: str, notification_id: str) -> None:
+    """Create a persistent notification using the modern HA service call API."""
+    hass.async_create_task(
+        hass.services.async_call(
+            "persistent_notification",
+            "create",
+            {
+                "message": message,
+                "title": title,
+                "notification_id": notification_id,
+            },
+        )
+    )
 
 # Per-device command locks to prevent race conditions from rapid clicks
 _device_command_locks: Dict[int, asyncio.Lock] = {}
@@ -101,6 +117,15 @@ async def async_setup_entry(
                     partition.get("device_mac", ""),
                 )
             )
+
+    # Register entities for bypass action handler lookup
+    hass.data[DOMAIN].setdefault("alarm_entities", {})
+    for entity in entities:
+        if isinstance(entity, GuardianUnifiedAlarmControlPanel):
+            key = (entity._device_id, "unified")
+        else:
+            key = (entity._device_id, "individual", entity._partition_id)
+        hass.data[DOMAIN]["alarm_entities"][key] = entity
 
     async_add_entities(entities)
 
@@ -236,7 +261,8 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
         actual = self.state
         if actual != expected_state:
             if expected_state in (AlarmControlPanelState.ARMED_AWAY, AlarmControlPanelState.ARMED_HOME):
-                self.hass.components.persistent_notification.async_create(
+                _notify(
+                    self.hass,
                     "O alarme pode nao ter armado corretamente.\n\n"
                     "Verifique se existem zonas abertas ou "
                     "se o painel respondeu ao comando.",
@@ -356,7 +382,8 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                             self._optimistic_state = None
                             self.async_write_ha_state()
                             # Show error to user via persistent notification
-                            self.hass.components.persistent_notification.async_create(
+                            _notify(
+                                self.hass,
                                 error_msg,
                                 title="Erro ao Desarmar Alarme",
                                 notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
@@ -369,7 +396,8 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                     self._optimistic_state = None
                     self.async_write_ha_state()
                     # Show error notification
-                    self.hass.components.persistent_notification.async_create(
+                    _notify(
+                        self.hass,
                         f"Erro ao desarmar: {str(e)}",
                         title="Erro ao Desarmar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
@@ -420,11 +448,16 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                             self._optimistic_state = None
                             self.async_write_ha_state()
                             # Show error to user via persistent notification
-                            self.hass.components.persistent_notification.async_create(
+                            _notify(
+                                self.hass,
                                 error_msg,
                                 title="Erro ao Armar Alarme",
                                 notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
                             )
+                            # Send actionable mobile notification for open zones
+                            open_zones = result.get("open_zones", [])
+                            if open_zones:
+                                self._store_bypass_and_notify("home", open_zones)
                         else:
                             _LOGGER.warning(f"Arm home command sent but no response received")
                             self._optimistic_state = AlarmControlPanelState.ARMED_HOME
@@ -435,7 +468,8 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                     self._optimistic_state = None
                     self.async_write_ha_state()
                     # Show error notification
-                    self.hass.components.persistent_notification.async_create(
+                    _notify(
+                        self.hass,
                         f"Erro ao armar (home): {str(e)}",
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
@@ -485,11 +519,16 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                             self._optimistic_state = None
                             self.async_write_ha_state()
                             # Show error to user via persistent notification
-                            self.hass.components.persistent_notification.async_create(
+                            _notify(
+                                self.hass,
                                 error_msg,
                                 title="Erro ao Armar Alarme",
                                 notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
                             )
+                            # Send actionable mobile notification for open zones
+                            open_zones = result.get("open_zones", [])
+                            if open_zones:
+                                self._store_bypass_and_notify("away", open_zones)
                         else:
                             _LOGGER.warning(f"Arm away command sent but no response received")
                             self._optimistic_state = AlarmControlPanelState.ARMED_AWAY
@@ -500,7 +539,8 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
                     self._optimistic_state = None
                     self.async_write_ha_state()
                     # Show error notification
-                    self.hass.components.persistent_notification.async_create(
+                    _notify(
+                        self.hass,
                         f"Erro ao armar (away): {str(e)}",
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_{self._partition_id}"
@@ -551,6 +591,22 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             )
 
         return f"Falha ao desarmar: {error}"
+
+    def _store_bypass_and_notify(self, arm_type: str, open_zones: list) -> None:
+        """Store bypass context and send actionable mobile notification."""
+        from . import _send_bypass_notification
+
+        self.hass.data[DOMAIN].setdefault("pending_bypass", {})
+        self.hass.data[DOMAIN]["pending_bypass"][self._device_id] = {
+            "arm_type": arm_type,
+            "entity_type": "individual",
+            "partition_id": self._partition_id,
+            "zone_indices": [z["index"] for z in open_zones if isinstance(z, dict) and "index" in z],
+            "timestamp": time.monotonic(),
+        }
+        self.hass.async_create_task(
+            _send_bypass_notification(self.hass, self._device_id, arm_type, open_zones)
+        )
 
 
 class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
@@ -755,7 +811,8 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         actual = self.state
         if actual != expected_state:
             if expected_state in (AlarmControlPanelState.ARMED_AWAY, AlarmControlPanelState.ARMED_HOME):
-                self.hass.components.persistent_notification.async_create(
+                _notify(
+                    self.hass,
                     "O alarme pode nao ter armado corretamente.\n\n"
                     "Verifique se existem zonas abertas ou "
                     "se o painel respondeu ao comando.",
@@ -805,6 +862,22 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
                 return AlarmControlPanelState.ARMED_HOME
 
         return AlarmControlPanelState.ARMED_HOME
+
+    def _store_bypass_and_notify(self, arm_type: str, open_zones: list) -> None:
+        """Store bypass context and send actionable mobile notification."""
+        from . import _send_bypass_notification
+
+        self.hass.data[DOMAIN].setdefault("pending_bypass", {})
+        self.hass.data[DOMAIN]["pending_bypass"][self._device_id] = {
+            "arm_type": arm_type,
+            "entity_type": "unified",
+            "partition_id": None,
+            "zone_indices": [z["index"] for z in open_zones if isinstance(z, dict) and "index" in z],
+            "timestamp": time.monotonic(),
+        }
+        self.hass.async_create_task(
+            _send_bypass_notification(self.hass, self._device_id, arm_type, open_zones)
+        )
 
     async def async_alarm_disarm(self, code: str = None) -> None:
         """Disarm all partitions that are currently armed."""
@@ -858,7 +931,8 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
                     self._optimistic_state = None
                     self.async_write_ha_state()
                     error_msg = "Falha ao desarmar:\n" + "\n".join(errors)
-                    self.hass.components.persistent_notification.async_create(
+                    _notify(
+                        self.hass,
                         error_msg,
                         title="Erro ao Desarmar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_unified"
@@ -948,11 +1022,15 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
                     else:
                         error_msg = "Falha ao armar (Em Casa):\n" + "\n".join(errors)
 
-                    self.hass.components.persistent_notification.async_create(
+                    _notify(
+                        self.hass,
                         error_msg,
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_unified"
                     )
+                    # Send actionable mobile notification for open zones
+                    if open_zones_all:
+                        self._store_bypass_and_notify("home", open_zones_all)
                     return
 
                 # Don't clear optimistic state here - let SSE event update
@@ -1020,11 +1098,15 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
                     else:
                         error_msg = "Falha ao armar (Ausente):\n" + "\n".join(errors)
 
-                    self.hass.components.persistent_notification.async_create(
+                    _notify(
+                        self.hass,
                         error_msg,
                         title="Erro ao Armar Alarme",
                         notification_id=f"alarm_error_{self._device_id}_unified"
                     )
+                    # Send actionable mobile notification for open zones
+                    if open_zones_all:
+                        self._store_bypass_and_notify("away", open_zones_all)
                     return
 
                 # Don't clear optimistic state here - let SSE event update

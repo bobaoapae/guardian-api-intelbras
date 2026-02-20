@@ -264,6 +264,23 @@ class GuardianApiClient:
         )
         return result
 
+    async def bypass_zones(
+        self,
+        device_id: int,
+        zone_indices: List[int],
+        bypass: bool = True
+    ) -> Dict[str, Any]:
+        """Bypass (anular) or unbypass zones.
+
+        Returns:
+            Dict with 'success' (bool) and optionally 'error' (str)
+        """
+        return await self._request_with_error(
+            "POST",
+            f"/api/v1/alarm/{device_id}/bypass-zone",
+            {"zone_indices": zone_indices, "bypass": bypass}
+        )
+
     async def _request_with_error(
         self,
         method: str,

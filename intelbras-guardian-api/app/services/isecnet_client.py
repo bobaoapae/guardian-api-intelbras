@@ -9,7 +9,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from app.services.isecnet_protocol import ISECNetProtocol, AlarmStatus
 
@@ -489,6 +489,53 @@ class ISECNetClient:
                 return success, message
             except Exception as e:
                 logger.error(f"Error disarming device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
+
+    async def bypass_zones(
+        self,
+        device_id: int,
+        mac: str,
+        password: str,
+        zone_indices: List[int],
+        bypass: bool = True,
+        use_ip_receiver: bool = False,
+        ip_receiver_addr: Optional[str] = None,
+        ip_receiver_port: Optional[int] = None,
+        ip_receiver_account: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Bypass (anular) or unbypass zones.
+
+        Args:
+            device_id: Device ID
+            mac: Device MAC address
+            password: Alarm panel password
+            zone_indices: List of zone indices (0-based) to bypass/unbypass
+            bypass: True to bypass, False to unbypass
+            use_ip_receiver: Use IP receiver instead of cloud
+            ip_receiver_addr: IP receiver server address
+            ip_receiver_port: IP receiver server port
+            ip_receiver_account: IP receiver account
+
+        Returns:
+            Tuple of (success, message)
+        """
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
+
+            try:
+                success, message = await conn.protocol.bypass_zones(zone_indices, bypass)
+                return success, message
+            except Exception as e:
+                logger.error(f"Error bypassing zones for device {device_id}: {e}")
                 async with self._lock:
                     await self._disconnect_device(device_id)
                 return False, str(e)

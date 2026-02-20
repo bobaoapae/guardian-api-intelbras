@@ -470,6 +470,52 @@ class ISECNetProtocol:
 
         return self._build_packet(Command.BYPASS_ZONE, payload)
 
+    def _build_bypass_zone_cmd(self, zone_index: int, bypass: bool) -> bytes:
+        """Build V2 single-zone bypass command.
+
+        Uses BYPASS_ZONE command (0x401F) with payload [zone_index, 0x01|0x00].
+        Unlike the eletrificador shock command, no 0xFF marker is used.
+
+        Args:
+            zone_index: Zone index (0-based)
+            bypass: True to bypass (anular), False to unbypass
+
+        Returns:
+            Command packet bytes
+        """
+        payload = [zone_index, 0x01 if bypass else 0x00]
+        logger.debug(f"Bypass zone cmd: zone={zone_index}, bypass={bypass}, payload={bytes(payload).hex()}")
+        return self._build_packet(Command.BYPASS_ZONE, payload)
+
+    def _build_isecv1_bypass_cmd(self, zone_indices: List[int], bypass: bool, total_zones: int = 48) -> bytes:
+        """Build ISECNet V1 bypass command using bitmask.
+
+        V1 bypass uses command byte 0x42 ('B') followed by a bitmask of zones.
+        Encoding: byte_pos = zone // 8, bit_pos = 7 - (zone % 8) → MSB = lowest zone.
+        Default 48 zones = 6 bytes of bitmask.
+
+        Args:
+            zone_indices: List of zone indices (0-based) to bypass/unbypass
+            bypass: True to bypass, False to unbypass
+            total_zones: Total number of zones (default 48)
+
+        Returns:
+            Command packet bytes
+        """
+        num_bytes = (total_zones + 7) // 8
+        bitmask = [0x00] * num_bytes
+
+        if bypass:
+            for zone in zone_indices:
+                if 0 <= zone < total_zones:
+                    byte_pos = zone // 8
+                    bit_pos = 7 - (zone % 8)
+                    bitmask[byte_pos] |= (1 << bit_pos)
+
+        command = [0x42] + bitmask  # 0x42 = 'B' for bypass
+        logger.debug(f"V1 bypass cmd: zones={zone_indices}, bypass={bypass}, bitmask={bytes(bitmask).hex()}")
+        return self._build_isecv1_cmd(command, self._password)
+
     def _build_pgm_cmd(self, pgm_index: int, enable: bool) -> bytes:
         """Build PGM (programmable output) on/off command.
 
@@ -1831,7 +1877,7 @@ class ISECNetProtocol:
                     success, error_code = self._parse_command_response(response)
                     if not success:
                         error_messages = {
-                            1: "Zone open",
+                            1: "Open zones",
                             2: "Battery low",
                             3: "No permission"
                         }
@@ -1923,6 +1969,85 @@ class ISECNetProtocol:
 
             except Exception as e:
                 logger.error(f"Error disarming: {e}")
+                return False, str(e)
+
+    async def bypass_zones(self, zone_indices: List[int], bypass: bool = True) -> Tuple[bool, str]:
+        """Bypass (anular) or unbypass zones.
+
+        V2: sends one command per zone via BYPASS_ZONE (0x401F).
+        V1: sends a single bitmask command for all zones.
+
+        Args:
+            zone_indices: List of zone indices (0-based) to bypass/unbypass
+            bypass: True to bypass, False to unbypass
+
+        Returns:
+            Tuple of (success, message)
+        """
+        async with self._lock:
+            if not self.is_authenticated:
+                return False, "Not authenticated"
+
+            if not zone_indices:
+                return False, "No zones specified"
+
+            try:
+                action = "Bypassing" if bypass else "Unbypassing"
+                logger.info(f"{action} zones {zone_indices}")
+
+                if self._is_ip_receiver or self._is_v1:
+                    # ISECNet V1 mode - single bitmask command
+                    cmd = self._build_isecv1_bypass_cmd(zone_indices, bypass)
+                    response = await self._send_and_receive(cmd, timeout=5.0, retries=1, retry_delay=0.5)
+
+                    if not response:
+                        return False, "No response"
+
+                    logger.debug(f"V1 Bypass response: {response.hex()}")
+                    success, message = self._parse_isecv1_command_response(response)
+
+                    if not success:
+                        # Map specific error codes
+                        if "Bypass denied" in message:
+                            return False, "Bypass denied: sem permissao no painel"
+                        if "Bypass - central activated" in message:
+                            return False, "Bypass negado: central esta armada"
+                        if "No permission" in message or "code 55" in message.lower():
+                            return False, "Bypass denied: sem permissao"
+                        return False, f"Bypass failed: {message}"
+
+                    return True, f"Zones {zone_indices} {'bypassed' if bypass else 'unbypassed'}"
+                else:
+                    # ISECNet V2 mode - one command per zone
+                    failed_zones = []
+                    for zone_idx in zone_indices:
+                        cmd = self._build_bypass_zone_cmd(zone_idx, bypass)
+                        response = await self._send_and_receive(cmd)
+
+                        if not response:
+                            failed_zones.append((zone_idx, "No response"))
+                            continue
+
+                        logger.debug(f"V2 Bypass zone {zone_idx} response: {response.hex()}")
+                        success, error_code = self._parse_command_response(response)
+
+                        if not success:
+                            error_messages = {
+                                0xE6: "Bypass denied",
+                                0xE8: "Central activated",
+                                55: "No permission",
+                            }
+                            err_msg = error_messages.get(error_code, f"Error {error_code}")
+                            failed_zones.append((zone_idx, err_msg))
+
+                    if failed_zones:
+                        details = ", ".join(f"zona {z}: {msg}" for z, msg in failed_zones)
+                        return False, f"Bypass failed: {details}"
+
+                    return True, f"Zones {zone_indices} {'bypassed' if bypass else 'unbypassed'}"
+
+            except Exception as e:
+                logger.error(f"Error bypassing zones: {e}")
                 return False, str(e)
 
     async def shock_on(self, zones: Optional[List[int]] = None) -> Tuple[bool, str]:
