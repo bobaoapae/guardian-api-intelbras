@@ -491,8 +491,12 @@ class ISECNetProtocol:
         """Build ISECNet V1 bypass command using bitmask.
 
         V1 bypass uses command byte 0x42 ('B') followed by a bitmask of zones.
-        Encoding: byte_pos = zone // 8, bit_pos = 7 - (zone % 8) → MSB = lowest zone.
+        Bit encoding matches status response: bit_pos = zone % 8, byte_pos = zone // 8.
+        Zone 0 (0-based) = bit 0 of byte 0, zone 7 = bit 7 of byte 0, etc.
         Default 48 zones = 6 bytes of bitmask.
+
+        Note: this is a FULL STATE bitmask — bit=1 means bypass, bit=0 means no bypass.
+        All zones not in zone_indices will be unbypassed.
 
         Args:
             zone_indices: List of zone indices (0-based) to bypass/unbypass
@@ -509,11 +513,11 @@ class ISECNetProtocol:
             for zone in zone_indices:
                 if 0 <= zone < total_zones:
                     byte_pos = zone // 8
-                    bit_pos = 7 - (zone % 8)
+                    bit_pos = zone % 8
                     bitmask[byte_pos] |= (1 << bit_pos)
 
         command = [0x42] + bitmask  # 0x42 = 'B' for bypass
-        logger.debug(f"V1 bypass cmd: zones={zone_indices}, bypass={bypass}, bitmask={bytes(bitmask).hex()}")
+        logger.info(f"V1 bypass cmd: zones={zone_indices}, bypass={bypass}, bitmask={[f'0x{b:02x}' for b in bitmask]}, total_zones={total_zones}")
         return self._build_isecv1_cmd(command, self._password)
 
     def _build_pgm_cmd(self, pgm_index: int, enable: bool) -> bytes:
@@ -2003,7 +2007,7 @@ class ISECNetProtocol:
                     if not response:
                         return False, "No response"
 
-                    logger.debug(f"V1 Bypass response: {response.hex()}")
+                    logger.info(f"V1 Bypass response ({len(response)} bytes): {response.hex()}")
                     success, message = self._parse_isecv1_command_response(response)
 
                     if not success:
