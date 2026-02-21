@@ -18,11 +18,14 @@ Este add-on fornece um middleware FastAPI que se comunica com centrais de alarme
 
 - Status do alarme em tempo real (polling 1s via ISECNet com conexão persistente)
 - Armar/Desarmar partições (modos ausente e em casa)
+- Alarme unificado (controlar múltiplas partições com uma entidade)
+- **Bypass de zonas abertas** com notificação actionable no celular (bypass + re-arme automático)
 - Monitoramento de zonas com nomes amigáveis personalizados
 - Sensores wireless em painéis smart (bateria, sinal, tamper)
-- Controle de eletrificador (cerca elétrica)
-- Desligar sirene
+- Controle de eletrificador (choque e alarme independentes)
+- Desligar sirene sem desarmar
 - Detecção de indisponibilidade de conexão (entidades ficam "Unavailable" no HA)
+- Reconexão automática em falha de conexão TCP
 - Histórico de eventos + SSE para eventos em tempo real
 - Web UI para configuração e testes
 

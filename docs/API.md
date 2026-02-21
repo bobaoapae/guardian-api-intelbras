@@ -327,6 +327,67 @@ Igual a `/alarm/{device_id}/status`
 
 ---
 
+### POST /alarm/{device_id}/bypass-zone
+
+Bypass (anular) ou remover bypass de zonas.
+
+**Headers:**
+- `X-Session-ID`: Seu session ID
+
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
+
+**Body da Requisição:**
+```json
+{
+  "zone_indices": [33, 35],
+  "bypass": true
+}
+```
+
+**Campos:**
+- `zone_indices`: Lista de índices de zonas (base 0) para bypass
+- `bypass`: `true` para anular, `false` para remover anulação
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "device_id": 12345,
+  "message": "Zones [33, 35] bypassed"
+}
+```
+
+**Erros:**
+- `400`: Bypass negado (sem permissão no painel, central armada)
+- `503`: Central indisponível
+
+**Notas:**
+- V1 (AMT 2018 E Smart, etc.): envia bitmask com todas as zonas de uma vez. É um bitmask de estado completo — zonas não listadas terão bypass removido.
+- V2 (AMT 8000, etc.): envia um comando por zona individualmente.
+
+---
+
+### POST /alarm/{device_id}/siren/off
+
+Desliga a sirene sem alterar o estado de arme.
+
+**Headers:**
+- `X-Session-ID`: Seu session ID
+
+**Parâmetros de Path:**
+- `device_id`: ID do dispositivo (inteiro)
+
+**Resposta:**
+```json
+{
+  "success": true,
+  "message": "Sirene desligada"
+}
+```
+
+---
+
 ## Endpoints de Zonas
 
 ### GET /devices/{device_id}/zones
@@ -424,31 +485,78 @@ Obtém histórico de eventos do alarme.
 - `X-Session-ID`: Seu session ID
 
 **Parâmetros de Query:**
-- `limit`: Número máximo de eventos (padrão: 50)
+- `limit`: Número máximo de eventos (padrão: 50, máx: 100)
 - `offset`: Offset de paginação (padrão: 0)
+- `since`: Data ISO 8601 para filtrar eventos (opcional)
 
 **Resposta:**
 ```json
-[
-  {
-    "id": 123456,
-    "timestamp": "2024-01-24T10:30:00Z",
-    "event_type": "alarm_triggered",
-    "device_id": 12345,
-    "partition_id": 0,
-    "zone": {
-      "id": 1,
-      "name": "Zona 01",
-      "friendly_name": "Porta da Frente"
-    },
-    "notification": {
-      "code": 1000,
-      "title": "Alarme Disparado",
-      "message": "Zona 01 foi disparada"
+{
+  "events": [
+    {
+      "id": 123456,
+      "timestamp": "2024-01-24T10:30:00Z",
+      "event_type": "alarm_triggered",
+      "device_id": 12345,
+      "partition_id": 0,
+      "zone": {
+        "id": 1,
+        "name": "Zona 01",
+        "friendly_name": "Porta da Frente"
+      },
+      "notification": {
+        "code": 1000,
+        "title": "Alarme Disparado",
+        "message": "Zona 01 foi disparada"
+      }
     }
-  }
-]
+  ],
+  "total": 150,
+  "offset": 0,
+  "limit": 50
+}
 ```
+
+---
+
+### GET /events/recent
+
+Obtém os eventos mais recentes.
+
+**Parâmetros de Query:**
+- `count`: Número de eventos (padrão: 10, máx: 50)
+
+**Resposta:**
+```json
+{
+  "events": [...],
+  "count": 10
+}
+```
+
+---
+
+### GET /events/stream
+
+Stream de eventos em tempo real via Server-Sent Events (SSE).
+
+**Parâmetros de Query (alternativo ao header):**
+- `session_id`: Session ID
+
+**Formato dos eventos SSE:**
+```
+event: connected
+data: {"message": "Connected to event stream"}
+
+event: alarm_event
+data: {"event_type": "arm", "device_id": 12345, ...}
+
+event: ping
+data: {"timestamp": "2024-01-24T10:30:00Z"}
+```
+
+- O evento `ping` é enviado a cada 30s como keepalive
+- A conexão é mantida aberta indefinidamente
 
 ---
 

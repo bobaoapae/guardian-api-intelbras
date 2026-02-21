@@ -172,6 +172,9 @@ Payload: `[partition_index][operation]`
 | PANIC | 0x50 | 80 | 'P' | Pânico |
 | SIREN_OFF | 0x4F | 79 | 'O' | Desligar sirene |
 | PGM | 0x47 | 71 | 'G' | Controle PGM |
+| BYPASS | 0x42 | 66 | 'B' | Bypass de zonas (bitmask) |
+| GET_SMART_STATUS | 0x5D | 93 | ']' | Status estendido com wireless (AMT 2018 E Smart, AMT 1000 Smart) |
+| GET_EXTENDED_STATUS | 0x5B | 91 | '[' | Status estendido (AMT 4010 Smart) |
 
 ### Comandos do Servidor V1
 
@@ -225,6 +228,61 @@ Exemplo armar partição A em modo stay:
                          |     +-------- 'A' = Partition A
                          +-------------- 'A' = Activate command
 ```
+
+### Comando de Bypass V1 (0x42)
+
+O bypass de zonas no V1 usa um bitmask de estado completo. Bit=1 significa zona anulada, bit=0 significa zona ativa. O número de bytes do bitmask depende do modelo:
+
+| Modelo | Zonas | Bytes do bitmask | Total do comando |
+|--------|-------|------------------|------------------|
+| AMT 2018 E Smart | 48 | 6 | 7 (0x42 + 6) |
+| AMT 2018 / AMT 2018 E EG | 48 | 6 | 7 |
+| ANM 24 Net / ANM 24 Net G2 | 24 | 3 | 4 |
+| AMT 4010 Smart | 64 | 8 | 9 |
+
+**Formato do bitmask:**
+```
+Byte 0: bit 0 = zona 1,  bit 1 = zona 2,  ..., bit 7 = zona 8
+Byte 1: bit 0 = zona 9,  bit 1 = zona 10, ..., bit 7 = zona 16
+...
+Byte N: bit 0 = zona N*8+1, ..., bit 7 = zona (N+1)*8
+```
+
+Encoding: mesma ordem de bits usada na resposta de status (LSB = zona mais baixa do grupo).
+
+**Exemplo: bypass da zona 34 (1-indexed) no AMT 2018 E Smart:**
+```
+Payload: [0x42, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00]
+                                          ^
+                                          byte 4, bit 1 = zona 34
+```
+
+**Pacote completo (com senha "1234"):**
+```
+[0x0D][0xE9][0x21][31 32 33 34][42 00 00 00 00 02 00][0x21][checksum]
+ size  cmd   '!'   password     bypass cmd + bitmask   '!'
+```
+
+**Códigos de erro do bypass:**
+- `0xE6` (230): BYPASS_DENIED — sem permissão de bypass no perfil do usuário
+- `0xE8` (232): BYPASS_CENTRAL_ACTIVATED — não pode anular com central armada
+- `55` (0x37): Sem permissão (error code interno)
+
+### Status Estendido Smart (0x5D, 135+ bytes)
+
+Disponível nos modelos AMT 2018 E Smart (code 52) e AMT 1000 Smart (code 54). Inclui dados de sensores wireless:
+
+| Offset (data) | Tamanho | Descrição |
+|----------------|---------|-----------|
+| 1-8 | 8 bytes | Status das zonas (64 zonas, 1 bit cada) |
+| 13-18 | 6 bytes | Zonas anuladas (bitmask, mesma encoding do bypass) |
+| 19 | 1 byte | Código do modelo |
+| 21 | 1 byte | Partições habilitadas |
+| 22 | 1 byte | Status das partições (bitmask) |
+| 63-68 | 6 bytes | Zonas wireless (bitmask: bit=1 → sensor wireless) |
+| 69-74 | 6 bytes | Zonas com tamper (bitmask) |
+| 81-86 | 6 bytes | Zonas com bateria baixa (bitmask) |
+| 107+ | N bytes | Sinal wireless (1 byte por zona wireless, escala 0-10) |
 
 ---
 

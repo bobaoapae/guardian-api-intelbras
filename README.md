@@ -163,9 +163,19 @@ O protocolo usa:
 
 ### Dispositivos Suportados
 
-- **Centrais de Alarme**: AMT 2008, AMT 2010, AMT 2018, AMT 2018 E SMART, AMT 4010, série ANM
-- **Painéis Smart**: Suporte a sensores wireless (bateria, sinal, tamper) via comando 0x5D
-- **Eletrificadores**: ELC 5001, ELC 5002
+| Modelo | Protocolo | Partições | Notas |
+|--------|-----------|-----------|-------|
+| AMT 8000 / Lite / Pro | V2 Cloud | 16 | |
+| AMT 9000 | V2 Cloud | 8 | |
+| AMT 2018 E SMART | V1 Cloud / IP Receiver | 2 | Sensores wireless (bateria, sinal, tamper) |
+| AMT 1000 SMART | V1 Cloud / IP Receiver | 0 | Sensores wireless |
+| AMT 2018 E EG / E3G | V1 Cloud / IP Receiver | 2 | |
+| AMT 2016 E3G | V1 Cloud / IP Receiver | 2 | |
+| AMT 2118 EG | V1 Cloud / IP Receiver | 2 | |
+| AMT 4010 Smart | V1 Cloud / IP Receiver | 4 | |
+| AMT 1016 NET | V1 Cloud / IP Receiver | 4 | |
+| ANM 24 NET / G2 | V1 Cloud / IP Receiver | 0 | |
+| ELC 6012 NET / IND | V2 Cloud | — | Eletrificador (choque + alarme) |
 
 ## Funcionalidades
 
@@ -194,6 +204,14 @@ O protocolo usa:
 ### Controle de Eletrificador (Switches)
 - **Switch de Choque**: Habilitar/desabilitar choque elétrico
 - **Switch de Alarme**: Armar/desarmar alarme da cerca
+
+### Bypass de Zonas Abertas + Notificação Actionable
+- Ao tentar armar com zonas abertas, envia notificação no celular (mobile_app)
+- Botão "Ignorar Zonas e Armar" na notificação para bypass automático + re-arme
+- Bypass via protocolo ISECNet (V1: bitmask de todas as zonas, V2: por zona individual)
+- Contexto expira em 5 minutos (tenta armar direto sem bypass se expirado)
+- Notificação dismissada automaticamente após arme bem-sucedido
+- `persistent_notification` como fallback quando não há mobile_app
 
 ### Botão Desligar Sirene
 - Desliga a sirene da central sem alterar o estado de arme
@@ -303,7 +321,9 @@ Para status em tempo real via ISECNet:
 ### Controle de Alarme
 - `POST /api/v1/alarm/{device_id}/arm` - Armar partição
 - `POST /api/v1/alarm/{device_id}/disarm` - Desarmar partição
-- `GET /api/v1/alarm/{device_id}/status` - Obter status em tempo real (requer senha)
+- `POST /api/v1/alarm/{device_id}/bypass-zone` - Bypass (anular) zonas
+- `POST /api/v1/alarm/{device_id}/siren/off` - Desligar sirene
+- `POST /api/v1/alarm/{device_id}/status` - Obter status em tempo real (requer senha)
 - `GET /api/v1/alarm/{device_id}/status/auto` - Obter status usando senha salva
 
 ### Gerenciamento de Senha
@@ -317,6 +337,8 @@ Para status em tempo real via ISECNet:
 
 ### Eventos
 - `GET /api/v1/events` - Obter histórico de eventos do alarme
+- `GET /api/v1/events/recent` - Eventos mais recentes
+- `GET /api/v1/events/stream` - Stream SSE de eventos em tempo real
 
 ### Eletrificador
 - `POST /api/v1/eletrificador/{device_id}/shock/on` - Habilitar choque
@@ -529,9 +551,15 @@ Acesse documentação interativa da API em: http://localhost:8000/docs
 
 ## Roadmap
 
+- [x] Funcionalidade de bypass de zona (com notificação actionable no celular)
+- [x] Sensores wireless (bateria, sinal, tamper) para painéis smart
+- [x] Eletrificador: controle de choque e alarme independentes
+- [x] Alarme unificado (múltiplas partições em uma entidade)
+- [x] Desligar sirene sem desarmar
+- [x] Eventos em tempo real via SSE
+- [x] Reconexão automática e resiliência de conexão
+- [ ] Controle de PGM (saída programável) — protocolo implementado, falta endpoint API
 - [ ] Notificações push via Firebase Cloud Messaging
-- [ ] Controle de PGM (saída programável)
-- [ ] Funcionalidade de bypass de zona
 - [ ] Suporte a ISECNet local (sem relay da nuvem)
 - [ ] Integração com Google Assistant / Alexa
 
