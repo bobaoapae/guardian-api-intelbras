@@ -33,6 +33,14 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, description="Debug mode")
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
 
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def normalize_log_level(cls, v):
+        """Ensure LOG_LEVEL is always uppercase (e.g. 'debug' -> 'DEBUG')."""
+        if isinstance(v, str):
+            return v.upper()
+        return v
+
     # CORS configuration - accepts comma-separated string or list
     CORS_ORIGINS: Union[str, List[str]] = Field(
         default="http://localhost:8123,http://homeassistant.local:8123",
