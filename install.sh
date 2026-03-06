@@ -983,29 +983,29 @@ update() {
 
     cd "$INSTALL_DIR"
 
-    # Atualizar via git
-    if [ -d ".git" ]; then
-        print_info "Atualizando via git..."
-        # Descartar alterações locais e forçar atualização
-        git fetch origin
-        git reset --hard origin/main
-        print_success "Código atualizado"
-    else
-        print_warning "Não é um repositório git. Baixando nova versão..."
-        # Backup de arquivos de configuração
-        cp docker-compose.override.yml /tmp/ 2>/dev/null || true
+    # Update code and re-exec so new paths/logic take effect
+    if [ -z "$_GUARDIAN_REEXEC" ]; then
+        if [ -d ".git" ]; then
+            print_info "Atualizando via git..."
+            git fetch origin
+            git reset --hard origin/main
+            print_success "Código atualizado"
+        else
+            print_warning "Não é um repositório git. Baixando nova versão..."
+            cp docker-compose.override.yml /tmp/ 2>/dev/null || true
+            curl -L "$GITHUB_ZIP" -o /tmp/guardian-api.zip
+            unzip -o /tmp/guardian-api.zip -d /tmp/
+            cp -r /tmp/guardian-api-intelbras-main/* "$INSTALL_DIR/"
+            cp /tmp/docker-compose.override.yml "$INSTALL_DIR/" 2>/dev/null || true
+            rm -rf /tmp/guardian-api.zip /tmp/guardian-api-intelbras-main
+            print_success "Código atualizado"
+        fi
 
-        # Download novo
-        curl -L "$GITHUB_ZIP" -o /tmp/guardian-api.zip
-        unzip -o /tmp/guardian-api.zip -d /tmp/
-        cp -r /tmp/guardian-api-intelbras-main/* "$INSTALL_DIR/"
-
-        # Restaurar configuração
-        cp /tmp/docker-compose.override.yml "$INSTALL_DIR/" 2>/dev/null || true
-
-        rm -rf /tmp/guardian-api.zip /tmp/guardian-api-intelbras-main
-        print_success "Código atualizado"
+        # Re-exec the updated script so new code paths take effect
+        export _GUARDIAN_REEXEC=1
+        exec "$INSTALL_DIR/install.sh" --update
     fi
+    unset _GUARDIAN_REEXEC
 
     # Rebuild container
     print_info "Reconstruindo container..."
@@ -1055,7 +1055,7 @@ update() {
 
         # Tentar reiniciar HA automaticamente
         local ha_container=""
-        for container in homeassistant home-assistant hass; do
+        for container in homeassistant home-assistant hass ha; do
             if docker ps --format "{{.Names}}" | grep -q "^${container}$"; then
                 ha_container="$container"
                 break
