@@ -1007,7 +1007,8 @@ update() {
 
         # Re-exec the updated script so new code paths take effect
         export _GUARDIAN_REEXEC=1
-        exec "$INSTALL_DIR/install.sh" --update
+        chmod +x "$INSTALL_DIR/install.sh"
+        exec bash "$INSTALL_DIR/install.sh" --update
     fi
     unset _GUARDIAN_REEXEC
 
