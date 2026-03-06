@@ -591,6 +591,10 @@ install_ha_integration() {
 
     local custom_components="$HA_CONFIG_DIR/custom_components"
     local integration_src="$INSTALL_DIR/custom_components/intelbras_guardian"
+    # Fallback to legacy path
+    if [ ! -d "$integration_src" ]; then
+        integration_src="$INSTALL_DIR/home_assistant/custom_components/intelbras_guardian"
+    fi
     local integration_dst="$custom_components/intelbras_guardian"
 
     # Criar diretório custom_components se não existir
@@ -1050,8 +1054,17 @@ update() {
         mkdir -p "$HA_CONFIG_DIR/custom_components"
         print_info "Atualizando integração do Home Assistant..."
         rm -rf "$integration_dst"
-        cp -r "$INSTALL_DIR/custom_components/intelbras_guardian" "$integration_dst"
-        print_success "Integração atualizada"
+        # Try new path first, fallback to legacy path
+        local integration_src="$INSTALL_DIR/custom_components/intelbras_guardian"
+        if [ ! -d "$integration_src" ]; then
+            integration_src="$INSTALL_DIR/home_assistant/custom_components/intelbras_guardian"
+        fi
+        if [ -d "$integration_src" ]; then
+            cp -r "$integration_src" "$integration_dst"
+            print_success "Integração atualizada"
+        else
+            print_error "Diretório da integração não encontrado em $INSTALL_DIR"
+        fi
 
         # Tentar reiniciar HA automaticamente
         local ha_container=""
