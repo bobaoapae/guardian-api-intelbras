@@ -53,7 +53,11 @@
         "data": {
           "enable_unified": "Enable unified alarm",
           "home_partitions": "Partitions for 'Home' mode",
-          "away_partitions": "Partitions for 'Away' mode"
+          "away_partitions": "Partitions for 'Away' mode",
+          "arm_mode_0": "Partition 1 Arm Mode",
+          "arm_mode_1": "Partition 2 Arm Mode",
+          "arm_mode_2": "Partition 3 Arm Mode",
+          "arm_mode_3": "Partition 4 Arm Mode"
         }
       },
       "reauth": {

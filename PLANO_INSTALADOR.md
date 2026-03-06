@@ -237,7 +237,7 @@ HA_CONFIG="/home/usuario/homeassistant"
 mkdir -p "$HA_CONFIG/custom_components"
 
 # Copiar integração
-cp -r "$INSTALL_DIR/home_assistant/custom_components/intelbras_guardian" \
+cp -r "$INSTALL_DIR/custom_components/intelbras_guardian" \
       "$HA_CONFIG/custom_components/"
 
 # Ajustar permissões (se necessário)

@@ -590,7 +590,7 @@ install_ha_integration() {
     print_step "7/11 - Instalando integração do Home Assistant"
 
     local custom_components="$HA_CONFIG_DIR/custom_components"
-    local integration_src="$INSTALL_DIR/home_assistant/custom_components/intelbras_guardian"
+    local integration_src="$INSTALL_DIR/custom_components/intelbras_guardian"
     local integration_dst="$custom_components/intelbras_guardian"
 
     # Criar diretório custom_components se não existir
@@ -690,7 +690,7 @@ verify_installation() {
         print_success "Container rodando"
     else
         print_error "Container não está rodando"
-        ((errors++))
+        errors=$((errors + 1))
     fi
 
     # Verificar endpoint health
@@ -698,7 +698,7 @@ verify_installation() {
         print_success "API respondendo em http://localhost:${API_PORT}"
     else
         print_error "API não está respondendo"
-        ((errors++))
+        errors=$((errors + 1))
     fi
 
     # Verificar integração HA
@@ -706,7 +706,7 @@ verify_installation() {
         print_success "Integração HA instalada"
     else
         print_error "Integração HA não encontrada"
-        ((errors++))
+        errors=$((errors + 1))
     fi
 
     # Verificar diretório de dados
@@ -1028,7 +1028,7 @@ update() {
 
     # 2. Tentar via container do HA
     if [ -z "$ha_config_detected" ]; then
-        for container in homeassistant home-assistant hass; do
+        for container in homeassistant home-assistant hass ha; do
             local ha_mount=$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}' 2>/dev/null)
             if [ -n "$ha_mount" ] && [ -d "$ha_mount" ]; then
                 ha_config_detected="$ha_mount"
@@ -1050,7 +1050,7 @@ update() {
         mkdir -p "$HA_CONFIG_DIR/custom_components"
         print_info "Atualizando integração do Home Assistant..."
         rm -rf "$integration_dst"
-        cp -r "$INSTALL_DIR/home_assistant/custom_components/intelbras_guardian" "$integration_dst"
+        cp -r "$INSTALL_DIR/custom_components/intelbras_guardian" "$integration_dst"
         print_success "Integração atualizada"
 
         # Tentar reiniciar HA automaticamente

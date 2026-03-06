@@ -162,7 +162,7 @@ docker inspect homeassistant --format '{{range .Mounts}}{{if eq .Destination "/c
 mkdir -p /home/usuario/homeassistant/custom_components
 
 # Copiar integração
-cp -r home_assistant/custom_components/intelbras_guardian \
+cp -r custom_components/intelbras_guardian \
       /home/usuario/homeassistant/custom_components/
 
 # Reiniciar Home Assistant
@@ -176,7 +176,7 @@ Use o Add-on (veja Opção 1) - não precisa copiar arquivos manualmente.
 **Via SSH/SCP (qualquer instalação):**
 
 ```bash
-scp -r home_assistant/custom_components/intelbras_guardian \
+scp -r custom_components/intelbras_guardian \
       usuario@ip-do-ha:/caminho/config/custom_components/
 ```
 
@@ -317,7 +317,7 @@ docker-compose up -d
 rm -rf /config/custom_components/intelbras_guardian
 
 # Copiar novos arquivos
-cp -r home_assistant/custom_components/intelbras_guardian \
+cp -r custom_components/intelbras_guardian \
       /config/custom_components/
 
 # Reiniciar Home Assistant

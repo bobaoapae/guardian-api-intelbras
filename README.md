@@ -262,17 +262,28 @@ Abra http://localhost:8000 no navegador para:
 
 ### 3. Instalar Integração do Home Assistant
 
-**Para Home Assistant em Docker:**
+**Opção A: Via HACS (Recomendado)**
+
+1. Abra o HACS no Home Assistant
+2. Clique nos 3 pontos (canto superior direito) → **Repositórios personalizados**
+3. Adicione a URL do repositório: `https://github.com/bobaoapae/guardian-api-intelbras`
+4. Categoria: **Integração**
+5. Clique em **Adicionar** → encontre "Intelbras Guardian" → **Instalar**
+6. Reinicie o Home Assistant
+
+**Opção B: Via install.sh (Docker)**
+
+O script `install.sh` já copia a integração automaticamente para o diretório `custom_components` do HA.
+
+**Opção C: Cópia manual (Docker)**
 
 ```bash
 # Descobrir o caminho do volume de configuração do HA
 docker inspect homeassistant --format '{{range .Mounts}}{{if eq .Destination "/config"}}{{.Source}}{{end}}{{end}}'
-# Exemplo de saída: /home/usuario/homeassistant
 
-# Copiar integração para o diretório de configuração do HA
-# Substitua /home/usuario/homeassistant pelo caminho do seu HA
+# Copiar integração
 mkdir -p /home/usuario/homeassistant/custom_components
-cp -r home_assistant/custom_components/intelbras_guardian \
+cp -r custom_components/intelbras_guardian \
       /home/usuario/homeassistant/custom_components/
 
 # Reiniciar Home Assistant

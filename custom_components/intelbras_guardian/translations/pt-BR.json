@@ -1,0 +1,104 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Intelbras Guardian - Conexão API",
+        "description": "Informe o endereço do middleware FastAPI para conectar.",
+        "data": {
+          "fastapi_host": "Host do FastAPI (IP ou hostname)",
+          "fastapi_port": "Porta do FastAPI"
+        }
+      },
+      "oauth": {
+        "title": "Intelbras Guardian - Login",
+        "description": "Para completar a autenticação:\n\n1. Abra o link abaixo no seu navegador:\n\n**{auth_url}**\n\n2. Faça login com sua conta Intelbras\n\n3. Após o login, você será redirecionado para uma página com uma URL contendo `code=` e `state=`\n\n4. Copie a **URL completa** da barra de endereço do navegador e cole abaixo\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "URL de Callback (cole a URL completa após o login)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Não foi possível conectar ao middleware FastAPI. Verifique o host e a porta.",
+      "oauth_start_failed": "Falha ao iniciar fluxo OAuth. Verifique os logs do FastAPI.",
+      "oauth_callback_failed": "Autenticação falhou. Certifique-se de copiar a URL completa de callback.",
+      "callback_url_required": "Por favor, cole a URL de callback.",
+      "unknown": "Ocorreu um erro inesperado."
+    },
+    "abort": {
+      "already_configured": "Esta instância da API já está configurada."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opções do Intelbras Guardian",
+        "description": "Selecione uma opção para configurar.",
+        "menu_options": {
+          "configure_unified_alarm": "Configurar Alarme Unificado",
+          "configure_device_password": "Configurar Senha do Dispositivo",
+          "manage_zones": "Gerenciar Nomes das Zonas",
+          "reauth": "Re-autenticar (se a sessão expirou)"
+        }
+      },
+      "configure_unified_alarm": {
+        "title": "Configurar Alarme Unificado",
+        "description": "Selecione um dispositivo com múltiplas partições para configurar o alarme unificado.\n\nO alarme unificado permite controlar múltiplas partições com os modos 'Em Casa' e 'Ausente'.",
+        "data": {
+          "device": "Dispositivo"
+        }
+      },
+      "select_partitions": {
+        "title": "Configurar Partições",
+        "description": "Configure quais partições serão armadas em cada modo.\n\n**Em Casa**: Arma apenas as partições selecionadas (ex: sensores perimetrais)\n**Ausente**: Arma todas as partições selecionadas (ex: saindo de casa)",
+        "data": {
+          "enable_unified": "Habilitar alarme unificado",
+          "home_partitions": "Partições para modo 'Em Casa'",
+          "away_partitions": "Partições para modo 'Ausente'",
+          "arm_mode_0": "Modo de Arme da Partição 1",
+          "arm_mode_1": "Modo de Arme da Partição 2",
+          "arm_mode_2": "Modo de Arme da Partição 3",
+          "arm_mode_3": "Modo de Arme da Partição 4"
+        }
+      },
+      "reauth": {
+        "title": "Intelbras Guardian - Re-autenticar",
+        "description": "Sua sessão pode ter expirado. Para re-autenticar:\n\n1. Abra o link abaixo no seu navegador:\n\n**{auth_url}**\n\n2. Faça login com sua conta Intelbras\n\n3. Após o login, copie a **URL completa** da barra de endereço do navegador e cole abaixo\n\nAPI: {api_url}",
+        "data": {
+          "callback_url": "URL de Callback (cole a URL completa após o login)"
+        }
+      },
+      "configure_device_password": {
+        "title": "Selecionar Dispositivo",
+        "description": "Selecione um dispositivo para configurar a senha de comunicação via protocolo ISECNet.",
+        "data": {
+          "device": "Dispositivo"
+        }
+      },
+      "enter_password": {
+        "title": "Senha do Dispositivo",
+        "description": "Insira a senha do dispositivo: {device_name}\n\nEsta é a senha programada na central de alarme (não a senha da sua conta Intelbras).",
+        "data": {
+          "action": "Ação",
+          "device_password": "Senha do Dispositivo"
+        }
+      },
+      "manage_zones": {
+        "title": "Gerenciar Nomes das Zonas",
+        "description": "Os nomes amigáveis das zonas podem ser configurados via Web UI do FastAPI.\n\nAcesse: {webui_url}\n\nFaça login com suas credenciais Intelbras, selecione o dispositivo e clique em 'Zonas' para gerenciar os nomes."
+      }
+    },
+    "error": {
+      "save_failed": "Falha ao salvar senha. Verifique os logs do FastAPI.",
+      "delete_failed": "Falha ao remover senha.",
+      "password_required": "A senha é obrigatória.",
+      "oauth_callback_failed": "Autenticação falhou. Certifique-se de copiar a URL completa de callback.",
+      "callback_url_required": "Por favor, cole a URL de callback.",
+      "select_at_least_one": "Selecione pelo menos uma partição."
+    },
+    "abort": {
+      "not_loaded": "Integração não carregada. Tente novamente.",
+      "no_devices": "Nenhum dispositivo encontrado.",
+      "no_multi_partition_devices": "Nenhum dispositivo com múltiplas partições encontrado."
+    }
+  }
+}

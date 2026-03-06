@@ -3,6 +3,8 @@
 # Intelbras Guardian API Add-on
 # ==============================================================================
 
+REPO_URL="https://github.com/bobaoapae/guardian-api-intelbras"
+
 # Read configuration from options.json if it exists
 CONFIG_PATH=/data/options.json
 
@@ -33,6 +35,38 @@ echo "=============================================="
 echo "  Intelbras Guardian API Add-on"
 echo "=============================================="
 echo "Log level: ${LOG_LEVEL}"
+
+# ---------------------------------------------------------------------------
+# Auto-install HA integration (same pattern as the HACS "Get" add-on)
+# ---------------------------------------------------------------------------
+if [ -d "/homeassistant" ]; then
+    INTEGRATION_DIR="/homeassistant/custom_components/intelbras_guardian"
+
+    if [ ! -d "/homeassistant/custom_components" ]; then
+        mkdir -p /homeassistant/custom_components
+    fi
+
+    echo "  Downloading HA integration from GitHub..."
+    if curl -sL "${REPO_URL}/archive/refs/heads/main.tar.gz" -o /tmp/repo.tar.gz; then
+        tar xf /tmp/repo.tar.gz -C /tmp/
+        EXTRACTED=$(ls -d /tmp/guardian-api-intelbras-* 2>/dev/null | head -1)
+        if [ -n "$EXTRACTED" ] && [ -d "$EXTRACTED/custom_components/intelbras_guardian" ]; then
+            rm -rf "$INTEGRATION_DIR"
+            cp -r "$EXTRACTED/custom_components/intelbras_guardian" "$INTEGRATION_DIR"
+            echo "  Integration installed/updated successfully!"
+        else
+            echo "  WARNING: Downloaded archive does not contain expected files."
+        fi
+        rm -rf /tmp/repo.tar.gz /tmp/guardian-api-intelbras-*
+    else
+        if [ -d "$INTEGRATION_DIR" ]; then
+            echo "  WARNING: Download failed, keeping existing integration."
+        else
+            echo "  ERROR: Download failed and no integration installed."
+        fi
+    fi
+fi
+
 echo "API available at: http://[YOUR_HA_IP]:8000"
 echo "=============================================="
 

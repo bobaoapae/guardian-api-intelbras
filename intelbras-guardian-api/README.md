@@ -68,7 +68,7 @@ Após iniciar o add-on, acesse `http://[SEU_IP_HA]:8000` para:
 
 O add-on fornece apenas o middleware de API. Você também precisa da integração do Home Assistant:
 
-1. Copie `home_assistant/custom_components/intelbras_guardian` para a pasta `custom_components` do seu Home Assistant
+1. Copie `custom_components/intelbras_guardian` para a pasta `custom_components` do seu Home Assistant
 
 2. Reinicie o Home Assistant
 

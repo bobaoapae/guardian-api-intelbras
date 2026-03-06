@@ -19,7 +19,7 @@ ports:
 ports_description:
   8000/tcp: "FastAPI Web UI and REST API"
 map:
-  - config:rw
+  - homeassistant_config:rw
 options:
   log_level: "info"
 schema:
