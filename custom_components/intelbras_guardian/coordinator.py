@@ -42,6 +42,9 @@ class GuardianCoordinator(DataUpdateCoordinator):
         self._triggered_timestamps: Dict[int, float] = {}
         self._triggered_timeout = 600  # seconds
 
+        # Previous zone open states for edge detection (zone events)
+        self._prev_zone_open: Dict[tuple, bool] = {}
+
         # Cloud API throttle: only fetch devices/events every N cycles
         self._cloud_api_interval = 30  # seconds
         self._cloud_api_counter = 0
@@ -366,6 +369,16 @@ class GuardianCoordinator(DataUpdateCoordinator):
                 key = (partition.get("device_id"), partition.get("id"))
                 partition_index[key] = partition
 
+            # Detect zone open transitions (closed->open) for event entities
+            zone_triggered: List[tuple] = []
+            for zone in all_zones:
+                key = (zone.get("device_id"), zone.get("index"))
+                is_open = zone.get("is_open", False)
+                was_open = self._prev_zone_open.get(key, False)
+                if is_open and not was_open:
+                    zone_triggered.append(key)
+                self._prev_zone_open[key] = is_open
+
             return {
                 "devices": processed_devices,
                 "partitions": all_partitions,
@@ -375,6 +388,7 @@ class GuardianCoordinator(DataUpdateCoordinator):
                 "last_event": events[0] if events else None,
                 "_zone_index": zone_index,
                 "_partition_index": partition_index,
+                "_zone_triggered": zone_triggered,
             }
 
         except Exception as err:
