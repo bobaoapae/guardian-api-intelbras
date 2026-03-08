@@ -861,27 +861,45 @@ class ISECNetProtocol:
             return status
 
         # Standard alarm panel parsing (non-eletrificador)
-        # Partition enabled at data[21] (APK bytes[22])
+        # Model-specific byte offsets from APK decompilation:
+        #   AMT 2018 family (52,54,30,46,49,50,97,36,37): partitioned=data[21], armed=data[22], battery=data[31]
+        #   AMT 4010 (65): partitioned=data[27], armed=data[28..29], battery=data[41]
+        #   (AMT 4010 has a consistent +6 offset for partition fields, +10 for battery)
+        if model_code == 65:  # AMT_4010
+            partition_offset = 27
+            armed_offset = 28
+            battery_offset = 41
+            logger.debug(f"Using AMT 4010 byte offsets: partition={partition_offset}, armed={armed_offset}, battery={battery_offset}")
+        else:
+            partition_offset = 21
+            armed_offset = 22
+            battery_offset = 31
+
+        # Partition enabled byte
         # 0 = single partition mode, 1 = multiple partitions enabled
-        partition_enabled = data[21]
+        partition_enabled = data[partition_offset]
         status.partitions_enabled = bool(partition_enabled)
         self._partitions_enabled = bool(partition_enabled)  # Cache for arm/disarm commands
-        logger.info(f"Partition enabled byte: {partition_enabled} (partitions_enabled={status.partitions_enabled})")
+        logger.info(f"Partition enabled byte (data[{partition_offset}]): {partition_enabled} (partitions_enabled={status.partitions_enabled})")
 
-        # Partition armed status bits at data[22] (APK bytes[23])
+        # Partition armed status bits
         # APK parsePartitions: Each bit represents one partition's armed state
-        # bit 0 = partition A armed, bit 1 = partition B armed, etc.
-        # NOTE: STAY/AWAY mode info is in bytes[94] which only exists in COMPLETE status (96 bytes)
-        # For PARTIAL status (46 bytes), we only know if armed or not, not the mode.
-        partition_status_byte = data[22]
-        logger.info(f"Partition status byte: 0x{partition_status_byte:02X} (binary: {bin(partition_status_byte)})")
+        # bit 7 = partition A armed, bit 6 = partition B armed, etc. (charAt mapping)
+        # For AMT 4010 with 4 partitions: A,B in data[28], C,D in data[29]
+        partition_status_byte = data[armed_offset]
+        logger.info(f"Partition status byte (data[{armed_offset}]): 0x{partition_status_byte:02X} (binary: {bin(partition_status_byte)})")
 
         # Parse partitions - one bit per partition
+        # AMT 2018 family: all partitions in single byte (data[22])
+        # AMT 4010: partitions A,B in data[28], partitions C,D in data[29]
         partitions = []
         num_partitions = self._get_max_partitions_for_model(model_code)
 
         for i in range(num_partitions):
-            is_armed = bool(partition_status_byte & (1 << i))  # bit i = partition i armed
+            if model_code == 65 and i >= 2:  # AMT_4010 partitions C,D in next byte
+                is_armed = bool(data[armed_offset + 1] & (1 << (i - 2)))
+            else:
+                is_armed = bool(partition_status_byte & (1 << i))
 
             # For partial status (46 bytes), we don't have STAY mode info
             # Default to "armed_away" when armed (most common case)
@@ -923,33 +941,59 @@ class ISECNetProtocol:
                 status.arm_mode = "disarmed"
                 status.is_armed = False
 
-        # Battery level at data[31] (APK bytes[32])
-        battery_byte = data[31]
-        logger.debug(f"Battery byte: 0x{battery_byte:02X}")
+        # Battery level - model-specific offset
+        battery_byte = data[battery_offset]
+        logger.debug(f"Battery byte (data[{battery_offset}]): 0x{battery_byte:02X}")
 
-        # Output/Siren status at data[38] (APK bytes[39])
-        # This byte contains siren and PGM status bits
-        output_byte = data[38]
-        logger.debug(f"Output/siren byte: 0x{output_byte:02X}")
-
-        # Siren status is typically in the output byte
-        # Exact bit position depends on model
-        siren_active = bool(output_byte & 0x80)  # Bit 7 often indicates siren
-        status.is_triggered = siren_active
-        if siren_active:
-            logger.info("Siren is ACTIVE")
+        # Alarm/Siren status - model-specific byte positions
+        # From APK decompilation (sirenTriggered field):
+        #   AMT 2018/ESmart/ANM 24 Net/AMT 1000: list.get(39).charAt(5) = data[38] bit 2
+        #   AMT 4010:                             list.get(47).charAt(4) = data[46] bit 3
+        #   AMT 8000 (V2 protocol):               handled separately in _parse_status_response
+        if model_code == 65:  # AMT_4010
+            # AMT 4010 uses extended status (0x5B, ~96 bytes), siren at data[46] bit 3
+            if len(data) > 46:
+                siren_byte = data[46]
+                alarm_active = bool(siren_byte & 0x08)  # Bit 3
+                logger.debug(f"AMT 4010 siren byte (data[46]): 0x{siren_byte:02X}, alarm_bit3={alarm_active}")
+            else:
+                alarm_active = False
+                logger.warning(f"AMT 4010 response too short ({len(data)} bytes) for siren byte at data[46]")
+            # Also check data[38] bit 2 as fallback
+            output_byte = data[38]
+            fallback_alarm = bool(output_byte & 0x04)
+            status.is_triggered = alarm_active or fallback_alarm
+            if status.is_triggered:
+                logger.info(f"ALARM TRIGGERED (AMT 4010): siren_byte=0x{data[46] if len(data) > 46 else 0:02X} bit3={alarm_active}, "
+                           f"output_byte=0x{output_byte:02X} bit2={fallback_alarm}")
+        else:
+            # AMT 2018 family, ANM 24 Net, AMT 1000 Smart, and others: data[38] bit 2
+            output_byte = data[38]
+            logger.debug(f"Output/alarm byte: 0x{output_byte:02X}")
+            alarm_active = bool(output_byte & 0x04)  # Bit 2: alarm flag (APK confirmed)
+            siren_active = bool(output_byte & 0x80)  # Bit 7: siren (legacy/other models)
+            status.is_triggered = alarm_active or siren_active
+            if status.is_triggered:
+                logger.info(f"ALARM TRIGGERED: output_byte=0x{output_byte:02X} (alarm_bit2={alarm_active}, siren_bit7={siren_active})")
 
         # Parse zone/sector status
         # Log full hex data for debugging zone byte positions
         logger.info(f"V1 status raw data ({len(data)} bytes): {bytes(data).hex()}")
 
-        # Zone open status bytes
-        # data[1] serves dual purpose: response code (0x00=success) AND first zone byte
-        # (zones 0-7). Since successful responses always have 0x00 here, it works.
+        # Zone open status bytes - model-specific byte counts
+        # From APK: AMT 2018 family uses 6 bytes (48 zones), AMT 4010 uses 8 (64 zones),
+        # ANM 24 Net uses 3 (24 zones). Zone bytes always start at data[1].
         # Verified: data[5]=0x40 bit 6 → zone_num=38 (0-based) = Zona 39 in Guardian app ✓
         zones = []
         zone_bytes_start = 1  # After command echo (data[0]=0xE9)
-        zone_bytes_count = 8  # 8 bytes = 64 zones max
+        if model_code == 65:  # AMT_4010: 64 zones
+            zone_bytes_count = 8
+        elif model_code in (36, 37):  # ANM_24_NET, ANM_24_NET_G2: 24 zones
+            zone_bytes_count = 3
+        elif model_code == 54:  # AMT_1000_SMART: 36 zones (5 bytes covers 40)
+            zone_bytes_count = 5
+        else:  # AMT 2018 family: 48 zones
+            zone_bytes_count = 6
 
         if len(data) > zone_bytes_start + zone_bytes_count:
             zone_hex = bytes(data[zone_bytes_start:zone_bytes_start + zone_bytes_count]).hex()
@@ -974,6 +1018,32 @@ class ISECNetProtocol:
                 logger.info(f"Open zones: {open_zones}")
             else:
                 logger.info("All zones closed")
+
+        # Zone alarm bytes - which zones have triggered alarms
+        # From APK: alarm bytes follow open bytes with same count
+        #   AMT 2018: zone alarm at data[7..12] (list.get(8..13))
+        #   AMT 4010: zone alarm at data[9..16] (list.get(10..17))
+        #   ANM 24 Net: zone alarm at data[7..9] (list.get(8..10))
+        zone_alarm_start = zone_bytes_start + zone_bytes_count  # Right after open bytes
+        if len(data) > zone_alarm_start + zone_bytes_count and zones:
+            alarm_hex = bytes(data[zone_alarm_start:zone_alarm_start + zone_bytes_count]).hex()
+            logger.debug(f"Zone alarm bytes (data[{zone_alarm_start}:{zone_alarm_start + zone_bytes_count}]): {alarm_hex}")
+
+            alarmed_zones = []
+            for byte_idx in range(zone_bytes_count):
+                alarm_byte = data[zone_alarm_start + byte_idx]
+                for bit_idx in range(8):
+                    zone_num = byte_idx * 8 + bit_idx
+                    is_alarmed = bool(alarm_byte & (1 << bit_idx))
+                    # Update existing zone entry
+                    if zone_num < len(zones):
+                        zones[zone_num]["triggered"] = is_alarmed
+                        if is_alarmed:
+                            zones[zone_num]["state"] = "alarm"
+                            alarmed_zones.append(zone_num)
+
+            if alarmed_zones:
+                logger.info(f"Zones in ALARM: {alarmed_zones}")
 
         status.zones = zones
 

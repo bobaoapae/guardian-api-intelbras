@@ -42,6 +42,11 @@ class GuardianCoordinator(DataUpdateCoordinator):
         self._triggered_timestamps: Dict[int, float] = {}
         self._triggered_timeout = 600  # seconds
 
+        # SSE-detected triggered state protection: prevents ISECNet polling
+        # from clearing triggered state before HA automations can react.
+        # Maps device_id -> expiry timestamp
+        self._sse_triggered_until: Dict[int, float] = {}
+
         # Previous zone open states for edge detection (zone events)
         self._prev_zone_open: Dict[tuple, bool] = {}
 
@@ -102,6 +107,11 @@ class GuardianCoordinator(DataUpdateCoordinator):
         if event_data.get("event_type") == "state_changed":
             self._apply_state_change(event_data)
         else:
+            # If this is an alarm trigger event, set triggered state immediately
+            # so HA automations can react even if the alarm is disarmed quickly
+            if event_data.get("is_alarm") and self.data:
+                self._apply_alarm_trigger(event_data)
+
             # External event (cloud) - trigger full refresh
             self.hass.async_create_task(self.async_request_refresh())
 
@@ -127,6 +137,62 @@ class GuardianCoordinator(DataUpdateCoordinator):
             device["is_armed"] = new_status != "disarmed"
 
         # Notify HA that data changed (entities will read new state)
+        self.async_set_updated_data(self.data)
+
+    def _apply_alarm_trigger(self, event_data: Dict[str, Any]) -> None:
+        """Apply alarm trigger from SSE event to set triggered state immediately.
+
+        When a "Disparo de Setor" (or similar alarm event) arrives via SSE,
+        set the device as triggered right away. This ensures HA automations
+        watching for the 'triggered' state can react, even if the alarm is
+        disarmed on the keypad within seconds (before the next ISECNet poll).
+        """
+        device_id = event_data.get("device_id")
+        if not device_id:
+            return
+
+        # Ensure device_id is the right type for our dict lookup
+        device = self.data.get("devices", {}).get(device_id)
+        if not device:
+            try:
+                device_id = int(device_id)
+                device = self.data.get("devices", {}).get(device_id)
+            except (ValueError, TypeError):
+                pass
+
+        if not device:
+            _LOGGER.warning("SSE alarm trigger for unknown device %s", device_id)
+            return
+
+        _LOGGER.info(
+            "Alarm trigger detected via SSE for device %s: %s",
+            device_id, event_data.get("event_name"),
+        )
+
+        # Set device as triggered immediately
+        device["is_triggered"] = True
+        self._triggered_timestamps[device_id] = time.time()
+
+        # Protect triggered state from being cleared by ISECNet polling
+        # for 30 seconds — enough for HA automations to detect the change
+        self._sse_triggered_until[device_id] = time.time() + 30
+
+        # Update last_event so sensor.casa_last_event also updates immediately
+        zone = event_data.get("zone")
+        self.data["last_event"] = {
+            "id": event_data.get("id"),
+            "timestamp": event_data.get("timestamp"),
+            "event_type": event_data.get("event_name"),
+            "notification": {
+                "title": event_data.get("event_name"),
+                "message": event_data.get("device_name"),
+            },
+            "zone": zone,
+            "partition_id": event_data.get("partition_id"),
+            "device_id": device_id,
+        }
+
+        # Notify HA that data changed — entities will see triggered state
         self.async_set_updated_data(self.data)
 
     async def _async_update_data(self) -> Dict[str, Any]:
@@ -206,6 +272,14 @@ class GuardianCoordinator(DataUpdateCoordinator):
                             processed_devices[device_id]["arm_mode"] = status.get("arm_mode")
                             processed_devices[device_id]["is_armed"] = status.get("is_armed")
                             processed_devices[device_id]["is_triggered"] = status.get("is_triggered")
+
+                            # Protect SSE-detected triggered state from being
+                            # cleared by ISECNet polling before HA can react
+                            if device_id in self._sse_triggered_until:
+                                if time.time() < self._sse_triggered_until[device_id]:
+                                    processed_devices[device_id]["is_triggered"] = True
+                                else:
+                                    del self._sse_triggered_until[device_id]
 
                             # Track connection unavailability (e.g., AMT legacy app blocking)
                             connection_unavailable = status.get("connection_unavailable", False)
