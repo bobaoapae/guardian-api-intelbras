@@ -2148,12 +2148,12 @@ class ISECNetProtocol:
                 return False, str(e)
 
     async def shock_on(self, zones: Optional[List[int]] = None) -> Tuple[bool, str]:
-        """Turn on eletrificador shock (fence) = ARM partition 1.
+        """Turn on eletrificador shock (fence) = ARM all partitions.
 
-        Based on APK ParticoesAdapter.java line 72 + Amt8000.getArmaDesarmaCentralAlarmeAmt8000:
-        - Shock partition has getIdParticao()=1 (CercaAtiva)
-        - APK sends SYSTEM_ARM_DISARM (0x401E) with partition=1, operation=1 (ARM)
-        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 1, 1, checksum]
+        Based on APK CentralMenuActivity.getArmDisarmElc6012Net():
+        - ELC6012NET always uses partition=255 (0xFF = ALL partitions)
+        - ARM: getArmaDesarmaCentralAlarmeAmt8000((char) 1, 255)
+        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 0xFF, 1, checksum]
 
         Returns:
             Tuple of (success, message)
@@ -2163,18 +2163,18 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                # APK: getArmaDesarmaCentralAlarmeAmt8000((char)1, getIdParticao()=1)
-                # partition byte = 1 (shock). _build_arm_cmd adds +1, so partition_index=0
-                logger.info("Turning shock ON: SYSTEM_ARM_DISARM partition=1 (shock)")
+                # APK getArmDisarmElc6012Net: partition=255 (ALL), operation=1 (ARM)
+                # _build_arm_cmd with partition_index=None → 0xFF
+                logger.info("Turning shock ON: SYSTEM_ARM_DISARM partition=0xFF (all)")
 
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=0)
-                logger.debug(f"Shock ON command: {cmd.hex()}")
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=None)
+                logger.info(f"Shock ON command ({len(cmd)} bytes): {cmd.hex()}, source_id={self.source_id}")
                 response = await self._send_and_receive(cmd)
 
                 if not response:
                     return False, "No response"
 
-                logger.debug(f"Shock ON response ({len(response)} bytes): {response.hex()}")
+                logger.info(f"Shock ON response ({len(response)} bytes): {response.hex()}")
 
                 success, error_code = self._parse_command_response(response)
                 if not success:
@@ -2187,12 +2187,12 @@ class ISECNetProtocol:
                 return False, str(e)
 
     async def shock_off(self, zones: Optional[List[int]] = None) -> Tuple[bool, str]:
-        """Turn off eletrificador shock (fence) = DISARM partition 1.
+        """Turn off eletrificador shock (fence) = DISARM all partitions.
 
-        Based on APK ParticoesAdapter.java line 78 + Amt8000.getArmaDesarmaCentralAlarmeAmt8000:
-        - Shock partition has getIdParticao()=1 (CercaAtiva)
-        - APK sends SYSTEM_ARM_DISARM (0x401E) with partition=1, operation=0 (DISARM)
-        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 1, 0, checksum]
+        Based on APK CentralMenuActivity.getArmDisarmElc6012Net():
+        - ELC6012NET always uses partition=255 (0xFF = ALL partitions)
+        - DISARM: getArmaDesarmaCentralAlarmeAmt8000((char) 0, 255)
+        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 0xFF, 0, checksum]
 
         Returns:
             Tuple of (success, message)
@@ -2202,18 +2202,18 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                # APK: getArmaDesarmaCentralAlarmeAmt8000((char)0, getIdParticao()=1)
-                # partition byte = 1 (shock). _build_arm_cmd adds +1, so partition_index=0
-                logger.info("Turning shock OFF: SYSTEM_ARM_DISARM partition=1 (shock)")
+                # APK getArmDisarmElc6012Net: partition=255 (ALL), operation=0 (DISARM)
+                # _build_arm_cmd with partition_index=None → 0xFF
+                logger.info("Turning shock OFF: SYSTEM_ARM_DISARM partition=0xFF (all)")
 
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=0)
-                logger.debug(f"Shock OFF command: {cmd.hex()}")
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=None)
+                logger.info(f"Shock OFF command ({len(cmd)} bytes): {cmd.hex()}, source_id={self.source_id}")
                 response = await self._send_and_receive(cmd)
 
                 if not response:
                     return False, "No response"
 
-                logger.debug(f"Shock OFF response ({len(response)} bytes): {response.hex()}")
+                logger.info(f"Shock OFF response ({len(response)} bytes): {response.hex()}")
 
                 success, error_code = self._parse_command_response(response)
                 if not success:
