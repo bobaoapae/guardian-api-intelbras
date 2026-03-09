@@ -2129,10 +2129,11 @@ class ISECNetProtocol:
 
         This controls the shock/fence function independently from the alarm.
 
-        Based on APK ISECNetV2SDK.java:910-919 activateEletricfier():
-        - Uses SYSTEM_ARM_DISARM command (0x401E)
-        - With operation SYSTEM_ARM
-        - With partition_index=1 (becomes 2 in payload due to +1 encoding)
+        Based on APK ParticoesAdapter.java line 72 and Elc6012Net.java:
+        - Shock partition has getIdParticao()=1 (CercaAtiva)
+        - APK sends: getArmaDesarmaCentralAlarmeAmt8000((char) 1, getIdParticao())
+        - getIdParticao()=1 goes directly as partition byte in packet
+        - partition_index=0 here → payload byte = 0+1 = 1 (matching APK)
 
         Args:
             zones: Not used - shock is controlled by partition, not zones.
@@ -2145,11 +2146,11 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning shock ON using SYSTEM_ARM with partition_index=1")
+                logger.info(f"Turning shock ON using SYSTEM_ARM with partition_index=0 (payload byte=1)")
 
-                # APK uses: assembleSystemArmCentralCommand(sourceID, SYSTEM_ARM, 1)
-                # partition_index=1 → payload byte = 2 (due to +1 encoding)
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=1)
+                # APK ParticoesAdapter: shock partition ID=1 → partition byte=1
+                # _build_arm_cmd adds +1, so partition_index=0 → byte 1
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=0)
                 logger.debug(f"Shock ON command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
@@ -2173,10 +2174,11 @@ class ISECNetProtocol:
 
         This controls the shock/fence function independently from the alarm.
 
-        Based on APK ISECNetV2SDK.java:922-931 deactivateEletricfier():
-        - Uses SYSTEM_ARM_DISARM command (0x401E)
-        - With operation SYSTEM_DISARM
-        - With partition_index=1 (becomes 2 in payload due to +1 encoding)
+        Based on APK ParticoesAdapter.java line 78 and Elc6012Net.java:
+        - Shock partition has getIdParticao()=1 (CercaAtiva)
+        - APK sends: getArmaDesarmaCentralAlarmeAmt8000((char) 0, getIdParticao())
+        - getIdParticao()=1 goes directly as partition byte in packet
+        - partition_index=0 here → payload byte = 0+1 = 1 (matching APK)
 
         Args:
             zones: Not used - shock is controlled by partition, not zones.
@@ -2189,11 +2191,11 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning shock OFF using SYSTEM_DISARM with partition_index=1")
+                logger.info(f"Turning shock OFF using SYSTEM_DISARM with partition_index=0 (payload byte=1)")
 
-                # APK uses: assembleSystemArmCentralCommand(sourceID, SYSTEM_DISARM, 1)
-                # partition_index=1 → payload byte = 2 (due to +1 encoding)
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=1)
+                # APK ParticoesAdapter: shock partition ID=1 → partition byte=1
+                # _build_arm_cmd adds +1, so partition_index=0 → byte 1
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=0)
                 logger.debug(f"Shock OFF command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
@@ -2217,10 +2219,11 @@ class ISECNetProtocol:
 
         This controls the ALARM function independently from the SHOCK function.
 
-        Based on APK ISECNetV2SDK.java activateCentral() with isEletricfier=true:
-        - Uses SYSTEM_ARM_DISARM command (0x401E)
-        - With operation SYSTEM_ARM
-        - With partition_index=0 (becomes 1 in payload due to +1 encoding)
+        Based on APK ParticoesAdapter.java line 72 and Elc6012Net.java:
+        - Alarm partition has getIdParticao()=2 (AlarmeAtivo)
+        - APK sends: getArmaDesarmaCentralAlarmeAmt8000((char) 1, getIdParticao())
+        - getIdParticao()=2 goes directly as partition byte in packet
+        - partition_index=1 here → payload byte = 1+1 = 2 (matching APK)
 
         Returns:
             Tuple of (success, message)
@@ -2230,12 +2233,11 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning eletrificador ALARM ON using SYSTEM_ARM with partition_index=0")
+                logger.info(f"Turning eletrificador ALARM ON using SYSTEM_ARM with partition_index=1 (payload byte=2)")
 
-                # APK uses: assembleSystemArmCentralCommand(sourceID, SYSTEM_ARM, 0)
-                # For eletrificador, partitionIndex is forced to 0
-                # partition_index=0 → payload byte = 1 (due to +1 encoding)
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=0)
+                # APK ParticoesAdapter: alarm partition ID=2 → partition byte=2
+                # _build_arm_cmd adds +1, so partition_index=1 → byte 2
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=1)
                 logger.debug(f"Eletrificador ALARM ON command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
@@ -2259,10 +2261,11 @@ class ISECNetProtocol:
 
         This controls the ALARM function independently from the SHOCK function.
 
-        Based on APK ISECNetV2SDK.java deactivateCentral() with isEletricfier=true:
-        - Uses SYSTEM_ARM_DISARM command (0x401E)
-        - With operation SYSTEM_DISARM
-        - With partition_index=0 (becomes 1 in payload due to +1 encoding)
+        Based on APK ParticoesAdapter.java line 78 and Elc6012Net.java:
+        - Alarm partition has getIdParticao()=2 (AlarmeAtivo)
+        - APK sends: getArmaDesarmaCentralAlarmeAmt8000((char) 0, getIdParticao())
+        - getIdParticao()=2 goes directly as partition byte in packet
+        - partition_index=1 here → payload byte = 1+1 = 2 (matching APK)
 
         Returns:
             Tuple of (success, message)
@@ -2272,12 +2275,11 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning eletrificador ALARM OFF using SYSTEM_DISARM with partition_index=0")
+                logger.info(f"Turning eletrificador ALARM OFF using SYSTEM_DISARM with partition_index=1 (payload byte=2)")
 
-                # APK uses: assembleSystemArmCentralCommand(sourceID, SYSTEM_DISARM, 0)
-                # For eletrificador, partitionIndex is forced to 0
-                # partition_index=0 → payload byte = 1 (due to +1 encoding)
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=0)
+                # APK ParticoesAdapter: alarm partition ID=2 → partition byte=2
+                # _build_arm_cmd adds +1, so partition_index=1 → byte 2
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=1)
                 logger.debug(f"Eletrificador ALARM OFF command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
