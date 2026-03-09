@@ -2129,14 +2129,13 @@ class ISECNetProtocol:
 
         This controls the shock/fence function independently from the alarm.
 
-        Based on APK ParticoesAdapter.java line 72 and Elc6012Net.java:
-        - Shock partition has getIdParticao()=1 (CercaAtiva)
-        - APK sends: getArmaDesarmaCentralAlarmeAmt8000((char) 1, getIdParticao())
-        - getIdParticao()=1 goes directly as partition byte in packet
-        - partition_index=0 here → payload byte = 0+1 = 1 (matching APK)
+        Based on APK ISECNetV2Protocol.java:292-305 assembleEletricfierBypassCommand():
+        - Uses BYPASS_ZONE command (0x401F) with special payload
+        - Payload: [0xFF] + [8 zone state bytes] where 0x01=ON
+        - This is specific to eletrificador shock control via V2 Cloud
 
         Args:
-            zones: Not used - shock is controlled by partition, not zones.
+            zones: Optional list of zone indices (0-7) to enable. If None, enables all.
 
         Returns:
             Tuple of (success, message)
@@ -2146,11 +2145,9 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning shock ON using SYSTEM_ARM with partition_index=0 (payload byte=1)")
+                logger.info(f"Turning shock ON using BYPASS_ZONE (eletrificador) zones={zones}")
 
-                # APK ParticoesAdapter: shock partition ID=1 → partition byte=1
-                # _build_arm_cmd adds +1, so partition_index=0 → byte 1
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=0)
+                cmd = self._build_eletrificador_shock_cmd(enable=True, zones=zones)
                 logger.debug(f"Shock ON command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
@@ -2174,14 +2171,13 @@ class ISECNetProtocol:
 
         This controls the shock/fence function independently from the alarm.
 
-        Based on APK ParticoesAdapter.java line 78 and Elc6012Net.java:
-        - Shock partition has getIdParticao()=1 (CercaAtiva)
-        - APK sends: getArmaDesarmaCentralAlarmeAmt8000((char) 0, getIdParticao())
-        - getIdParticao()=1 goes directly as partition byte in packet
-        - partition_index=0 here → payload byte = 0+1 = 1 (matching APK)
+        Based on APK ISECNetV2Protocol.java:292-305 assembleEletricfierBypassCommand():
+        - Uses BYPASS_ZONE command (0x401F) with special payload
+        - Payload: [0xFF] + [8 zone state bytes] where 0x00=OFF
+        - This is specific to eletrificador shock control via V2 Cloud
 
         Args:
-            zones: Not used - shock is controlled by partition, not zones.
+            zones: Optional list of zone indices (0-7) to disable. If None, disables all.
 
         Returns:
             Tuple of (success, message)
@@ -2191,11 +2187,9 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning shock OFF using SYSTEM_DISARM with partition_index=0 (payload byte=1)")
+                logger.info(f"Turning shock OFF using BYPASS_ZONE (eletrificador) zones={zones}")
 
-                # APK ParticoesAdapter: shock partition ID=1 → partition byte=1
-                # _build_arm_cmd adds +1, so partition_index=0 → byte 1
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=0)
+                cmd = self._build_eletrificador_shock_cmd(enable=False, zones=zones)
                 logger.debug(f"Shock OFF command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
