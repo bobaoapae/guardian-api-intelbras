@@ -968,13 +968,14 @@ class ISECNetProtocol:
                            f"output_byte=0x{output_byte:02X} bit2={fallback_alarm}")
         else:
             # AMT 2018 family, ANM 24 Net, AMT 1000 Smart, and others: data[38] bit 2
+            # NOTE: data[38] bit 2 can produce false positives during arm/disarm transitions.
+            # The APK uses ignoreAlarmTriggered flag to suppress this after commands.
+            # We cross-check with zone alarm bytes instead - deferred until after zone parsing.
             output_byte = data[38]
             logger.debug(f"Output/alarm byte: 0x{output_byte:02X}")
-            alarm_active = bool(output_byte & 0x04)  # Bit 2: alarm flag (APK confirmed)
-            siren_active = bool(output_byte & 0x80)  # Bit 7: siren (legacy/other models)
-            status.is_triggered = alarm_active or siren_active
-            if status.is_triggered:
-                logger.info(f"ALARM TRIGGERED: output_byte=0x{output_byte:02X} (alarm_bit2={alarm_active}, siren_bit7={siren_active})")
+            alarm_bit2 = bool(output_byte & 0x04)  # Bit 2: alarm flag (transient during arm/disarm!)
+            siren_bit7 = bool(output_byte & 0x80)  # Bit 7: siren (more reliable)
+            # Don't set is_triggered yet - will cross-check with zone alarm data below
 
         # Parse zone/sector status
         # Log full hex data for debugging zone byte positions
@@ -1046,6 +1047,28 @@ class ISECNetProtocol:
                 logger.info(f"Zones in ALARM: {alarmed_zones}")
 
         status.zones = zones
+
+        # Cross-check triggered state with zone alarm data (for non-AMT 4010 models)
+        # data[38] bit 2 is unreliable during arm/disarm transitions (APK uses ignoreAlarmTriggered flag)
+        # We cross-check: only trigger if zones actually have alarms OR siren bit 7 is set
+        if model_code != 65:  # Non-AMT 4010 (AMT 4010 already handled above with data[46])
+            has_zone_alarm = any(z.get("triggered", False) for z in zones)
+            if siren_bit7:
+                # Bit 7 (siren hardware) is a reliable indicator
+                status.is_triggered = True
+                logger.info(f"ALARM TRIGGERED (siren): output_byte=0x{output_byte:02X} siren_bit7=True")
+            elif alarm_bit2 and has_zone_alarm:
+                # Bit 2 set AND zones confirm alarm - real trigger
+                status.is_triggered = True
+                logger.info(f"ALARM TRIGGERED (confirmed): output_byte=0x{output_byte:02X} alarm_bit2=True, zones_in_alarm=True")
+            elif has_zone_alarm:
+                # Zones in alarm even without output byte - real trigger
+                status.is_triggered = True
+                logger.info(f"ALARM TRIGGERED (zones): zones have active alarms")
+            elif alarm_bit2:
+                # Bit 2 set but NO zones in alarm - transient false positive (arm/disarm transition)
+                status.is_triggered = False
+                logger.debug(f"Suppressed transient alarm: output_byte=0x{output_byte:02X} bit2 set but no zones in alarm")
 
         # Extended wireless sensor data (AMT 2018 E Smart / AMT 1000 Smart: 0x5D response)
         if len(data) > 134:
