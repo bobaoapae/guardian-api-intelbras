@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class Command(IntEnum):
     """ISECNet V2 command codes."""
     CONNECT = 0x30F6  # 12534
-    APP_CONNECT = 0xFFF2  # 65522 - APK: enableMobileAPPConnection [0xFF, 0xF2]
+    APP_CONNECT = 0xFFF1  # 65521 - simplified app connect (APK uses 0xFFF2 with richer payload)
     AUTHORIZE = 0xF0F0  # 61680
     KEEP_ALIVE = 0xF0F7  # 61687
     DISCONNECT = 0xF0F1  # 61681
