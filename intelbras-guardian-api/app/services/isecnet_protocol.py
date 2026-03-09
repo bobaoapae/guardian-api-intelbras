@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class Command(IntEnum):
     """ISECNet V2 command codes."""
     CONNECT = 0x30F6  # 12534
-    APP_CONNECT = 0xFFF1  # 65521
+    APP_CONNECT = 0xFFF2  # 65522 - APK: enableMobileAPPConnection [0xFF, 0xF2]
     AUTHORIZE = 0xF0F0  # 61680
     KEEP_ALIVE = 0xF0F7  # 61687
     DISCONNECT = 0xF0F1  # 61681
@@ -392,7 +392,7 @@ class ISECNetProtocol:
 
         payload = [0x03]  # Auth type
         payload.extend(password_digits)
-        payload.extend(self._to_two_bytes(1))  # Software version
+        payload.extend([1, 0])  # Software version - APK sends [1, 0] NOT big-endian
 
         # Both IP Receiver and Cloud use standard ISECNet V2 format
         # For IP Receiver: sourceID is [0, 0] and NO encryption
@@ -2125,17 +2125,12 @@ class ISECNetProtocol:
                 return False, str(e)
 
     async def shock_on(self, zones: Optional[List[int]] = None) -> Tuple[bool, str]:
-        """Turn on eletrificador shock (fence).
+        """Turn on eletrificador shock (fence) = ARM partition 1.
 
-        This controls the shock/fence function independently from the alarm.
-
-        Based on APK ISECNetV2Protocol.java:292-305 assembleEletricfierBypassCommand():
-        - Uses BYPASS_ZONE command (0x401F) with special payload
-        - Payload: [0xFF] + [8 zone state bytes] where 0x01=ON
-        - This is specific to eletrificador shock control via V2 Cloud
-
-        Args:
-            zones: Optional list of zone indices (0-7) to enable. If None, enables all.
+        Based on APK ParticoesAdapter.java line 72 + Amt8000.getArmaDesarmaCentralAlarmeAmt8000:
+        - Shock partition has getIdParticao()=1 (CercaAtiva)
+        - APK sends SYSTEM_ARM_DISARM (0x401E) with partition=1, operation=1 (ARM)
+        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 1, 1, checksum]
 
         Returns:
             Tuple of (success, message)
@@ -2145,9 +2140,11 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning shock ON using BYPASS_ZONE (eletrificador) zones={zones}")
+                # APK: getArmaDesarmaCentralAlarmeAmt8000((char)1, getIdParticao()=1)
+                # partition byte = 1 (shock). _build_arm_cmd adds +1, so partition_index=0
+                logger.info("Turning shock ON: SYSTEM_ARM_DISARM partition=1 (shock)")
 
-                cmd = self._build_eletrificador_shock_cmd(enable=True, zones=zones)
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=0)
                 logger.debug(f"Shock ON command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
@@ -2167,17 +2164,12 @@ class ISECNetProtocol:
                 return False, str(e)
 
     async def shock_off(self, zones: Optional[List[int]] = None) -> Tuple[bool, str]:
-        """Turn off eletrificador shock (fence).
+        """Turn off eletrificador shock (fence) = DISARM partition 1.
 
-        This controls the shock/fence function independently from the alarm.
-
-        Based on APK ISECNetV2Protocol.java:292-305 assembleEletricfierBypassCommand():
-        - Uses BYPASS_ZONE command (0x401F) with special payload
-        - Payload: [0xFF] + [8 zone state bytes] where 0x00=OFF
-        - This is specific to eletrificador shock control via V2 Cloud
-
-        Args:
-            zones: Optional list of zone indices (0-7) to disable. If None, disables all.
+        Based on APK ParticoesAdapter.java line 78 + Amt8000.getArmaDesarmaCentralAlarmeAmt8000:
+        - Shock partition has getIdParticao()=1 (CercaAtiva)
+        - APK sends SYSTEM_ARM_DISARM (0x401E) with partition=1, operation=0 (DISARM)
+        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 1, 0, checksum]
 
         Returns:
             Tuple of (success, message)
@@ -2187,9 +2179,11 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning shock OFF using BYPASS_ZONE (eletrificador) zones={zones}")
+                # APK: getArmaDesarmaCentralAlarmeAmt8000((char)0, getIdParticao()=1)
+                # partition byte = 1 (shock). _build_arm_cmd adds +1, so partition_index=0
+                logger.info("Turning shock OFF: SYSTEM_ARM_DISARM partition=1 (shock)")
 
-                cmd = self._build_eletrificador_shock_cmd(enable=False, zones=zones)
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=0)
                 logger.debug(f"Shock OFF command: {cmd.hex()}")
                 response = await self._send_and_receive(cmd)
 
