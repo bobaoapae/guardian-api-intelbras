@@ -53,6 +53,22 @@ def _get_device_command_lock(device_id: int) -> asyncio.Lock:
     return _device_command_locks[device_id]
 
 
+def _pre_trigger_arm_mode_attr(coordinator: GuardianCoordinator, device_id: int) -> Optional[str]:
+    """Translate the coordinator's pre-trigger memory into a friendly value.
+
+    Used by template switches that want to know which armed mode the panel
+    was in immediately before the trigger fired (the central zeroes the
+    partition byte during an active alarm, which would otherwise lose this
+    information). Returns "away", "home", or None.
+    """
+    pre_mode = coordinator._pre_trigger_arm_mode.get(device_id)
+    if pre_mode == "armed_away":
+        return "away"
+    if pre_mode in ("armed_stay", "armed_home"):
+        return "home"
+    return None
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -340,6 +356,7 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             attrs["connection_unavailable"] = device.get("connection_unavailable", False)
             attrs["last_updated"] = device.get("last_updated")
 
+        attrs["pre_trigger_arm_mode"] = _pre_trigger_arm_mode_attr(self.coordinator, self._device_id)
         return attrs
 
     def _get_current_partition_state(self) -> Optional[str]:
@@ -697,67 +714,58 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         return states
 
-    @property
-    def state(self) -> str:
-        """Return the state of the unified alarm."""
-        # Use optimistic state if set
-        if self._optimistic_state is not None:
-            _LOGGER.debug(f"Unified alarm using optimistic state: {self._optimistic_state}")
-            return self._optimistic_state
+    def _compute_state(self) -> AlarmControlPanelState:
+        """Compute the unified alarm state from coordinator data.
 
+        Single source of truth shared by `state` (with optimistic override)
+        and `_get_real_state` (used to clear optimistic). Looks at the actual
+        armed mode of each partition (`armed_away` vs `armed_stay`/`armed_home`)
+        rather than just armed/disarmed sets — fixes Bug 4 where partial
+        arm_away with bypass was misclassified as ARMED_HOME.
+        """
         device = self.coordinator.get_device(self._device_id)
-
-        # Check if triggered
         if device and device.get("is_triggered"):
             return AlarmControlPanelState.TRIGGERED
 
-        # Get partition states
         partition_states = self._get_partition_states()
-        _LOGGER.debug(f"Unified alarm partition_states: {partition_states}")
-
         if not partition_states:
-            _LOGGER.debug("Unified alarm: no partition states, returning DISARMED")
             return AlarmControlPanelState.DISARMED
 
-        # Check which partitions are armed
-        # Note: Can't use "armed" in status because "disarmed" contains "armed"!
-        armed_partitions = set()
-        armed_states = {"armed_away", "armed_stay", "armed_home", "armed"}
+        mode_counts = {"away": 0, "home": 0}
+        armed_indices: set[int] = set()
         for idx, status in partition_states.items():
-            status_lower = str(status).lower() if status else ""
-            if status_lower in armed_states:
-                armed_partitions.add(idx)
+            s = str(status).lower() if status else ""
+            if s == "armed_away":
+                mode_counts["away"] += 1
+                armed_indices.add(idx)
+            elif s in ("armed_stay", "armed_home"):
+                mode_counts["home"] += 1
+                armed_indices.add(idx)
+            elif s == "armed":
+                # Generic "armed" without mode suffix — fall back to the
+                # configured intent for this partition (default: away).
+                intent = self._partition_arm_modes.get(str(idx), "away")
+                mode_counts[intent] = mode_counts.get(intent, 0) + 1
+                armed_indices.add(idx)
 
-        _LOGGER.debug(f"Unified alarm armed_partitions: {armed_partitions}")
-
-        # No partitions armed = DISARMED
-        if not armed_partitions:
-            _LOGGER.debug("Unified alarm: no armed partitions, returning DISARMED")
+        if not armed_indices:
             return AlarmControlPanelState.DISARMED
-
-        # Determine unified state based on configuration
-        away_set = set(self._away_partitions)
-        home_set = set(self._home_partitions)
-        away_only = away_set - home_set
-
-        _LOGGER.debug(
-            f"Unified alarm config: home_set={home_set}, away_set={away_set}, away_only={away_only}"
-        )
-
-        # ARMED_AWAY: All away partitions are armed
-        if away_set and away_set.issubset(armed_partitions):
-            _LOGGER.debug("Unified alarm: all away partitions armed, returning ARMED_AWAY")
+        # Any partition in armed_away dominates: covers partial arm_away with
+        # pending bypass, where one partition is already armed_away and the
+        # other waits for the user to confirm bypass of an open zone.
+        if mode_counts["away"] > 0:
             return AlarmControlPanelState.ARMED_AWAY
-
-        # ARMED_HOME: Home partitions armed, but away-only partitions NOT armed
-        if home_set and home_set.issubset(armed_partitions):
-            if not (away_only & armed_partitions):
-                _LOGGER.debug("Unified alarm: home partitions armed (away-only not armed), returning ARMED_HOME")
-                return AlarmControlPanelState.ARMED_HOME
-
-        # Some partitions armed but doesn't match patterns
-        _LOGGER.debug("Unified alarm: partial arm state, returning ARMED_HOME")
         return AlarmControlPanelState.ARMED_HOME
+
+    @property
+    def state(self) -> str:
+        """Return the state of the unified alarm."""
+        if self._optimistic_state is not None:
+            _LOGGER.debug(f"Unified alarm using optimistic state: {self._optimistic_state}")
+            return self._optimistic_state
+        computed = self._compute_state()
+        _LOGGER.debug(f"Unified alarm computed state: {computed}")
+        return computed
 
     @property
     def extra_state_attributes(self):
@@ -788,6 +796,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
             "away_partitions": self._away_partitions,
             "partition_arm_modes": self._partition_arm_modes,
             "partition_status": partition_status,
+            "pre_trigger_arm_mode": _pre_trigger_arm_mode_attr(self.coordinator, self._device_id),
         }
 
         if device:
@@ -831,37 +840,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
     def _get_real_state(self):
         """Get the real state from coordinator data (ignoring optimistic)."""
-        device = self.coordinator.get_device(self._device_id)
-
-        if device and device.get("is_triggered"):
-            return AlarmControlPanelState.TRIGGERED
-
-        partition_states = self._get_partition_states()
-        if not partition_states:
-            return AlarmControlPanelState.DISARMED
-
-        armed_partitions = set()
-        armed_states = {"armed_away", "armed_stay", "armed_home", "armed"}
-        for idx, status in partition_states.items():
-            status_lower = str(status).lower() if status else ""
-            if status_lower in armed_states:
-                armed_partitions.add(idx)
-
-        if not armed_partitions:
-            return AlarmControlPanelState.DISARMED
-
-        away_set = set(self._away_partitions)
-        home_set = set(self._home_partitions)
-        away_only = away_set - home_set
-
-        if away_set and away_set.issubset(armed_partitions):
-            return AlarmControlPanelState.ARMED_AWAY
-
-        if home_set and home_set.issubset(armed_partitions):
-            if not (away_only & armed_partitions):
-                return AlarmControlPanelState.ARMED_HOME
-
-        return AlarmControlPanelState.ARMED_HOME
+        return self._compute_state()
 
     def _store_bypass_and_notify(self, arm_type: str, open_zones: list) -> None:
         """Store bypass context and send actionable mobile notification."""

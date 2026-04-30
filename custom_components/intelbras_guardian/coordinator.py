@@ -38,9 +38,18 @@ class GuardianCoordinator(DataUpdateCoordinator):
         self.entry = entry
         self._last_event_id: Optional[int] = None
 
-        # Stale triggered state timeout (10 minutes)
-        self._triggered_timestamps: Dict[int, float] = {}
-        self._triggered_timeout = 600  # seconds
+        # Triggered state safety timeout: only clears `is_triggered` when the API
+        # has NOT confirmed it during the configured window — protects against
+        # SSE-orphan triggers (set by SSE but never confirmed by polling).
+        self._triggered_first_seen: Dict[int, float] = {}
+        self._triggered_timeout = 120  # seconds (was 600; now only for SSE-orphans)
+
+        # Snapshots taken when device first enters triggered state. Used to
+        # preserve the armed mode/status the panel was in before the trigger,
+        # because the AMT_2018_E_SMART zeroes the partition status byte during
+        # an active alarm. Cleared on the True→False transition.
+        self._pre_trigger_arm_mode: Dict[int, str] = {}
+        self._pre_trigger_partition_status: Dict[int, Dict[int, str]] = {}
 
         # SSE-detected triggered state protection: prevents ISECNet polling
         # from clearing triggered state before HA automations can react.
@@ -136,6 +145,24 @@ class GuardianCoordinator(DataUpdateCoordinator):
             device["arm_mode"] = new_status
             device["is_armed"] = new_status != "disarmed"
 
+            # If a re-arm command lands while the device is still triggered,
+            # update the pre-trigger memory so templates depending on the
+            # `pre_trigger_arm_mode` attribute reflect the user's new intent.
+            # Also refresh the partition snapshot so the per-partition restore
+            # in the next poll cycle uses the new mode (otherwise the
+            # preservation logic would overwrite it with the old armed value).
+            if device.get("is_triggered") and isinstance(new_status, str) and new_status.startswith("armed"):
+                self._pre_trigger_arm_mode[device_id] = new_status
+                new_snapshot: Dict[int, str] = {}
+                for idx, partition in enumerate(
+                    p for p in self.data.get("partitions", []) if p.get("device_id") == device_id
+                ):
+                    s = partition.get("status")
+                    if isinstance(s, str) and s.startswith("armed"):
+                        new_snapshot[idx] = s
+                if new_snapshot:
+                    self._pre_trigger_partition_status[device_id] = new_snapshot
+
         # Notify HA that data changed (entities will read new state)
         self.async_set_updated_data(self.data)
 
@@ -169,9 +196,27 @@ class GuardianCoordinator(DataUpdateCoordinator):
             device_id, event_data.get("event_name"),
         )
 
+        # Snapshot pre-trigger state on transition False -> True so templates
+        # and the unified panel can recover the armed mode the panel was in
+        # before the alarm fired (the AMT_2018_E_SMART zeroes the partition
+        # byte during an active alarm, which would otherwise be lost).
+        if not device.get("is_triggered"):
+            prev_arm_mode = device.get("arm_mode")
+            if isinstance(prev_arm_mode, str) and prev_arm_mode.startswith("armed"):
+                self._pre_trigger_arm_mode[device_id] = prev_arm_mode
+            partition_snapshot: Dict[int, str] = {}
+            for idx, partition in enumerate(
+                p for p in self.data.get("partitions", []) if p.get("device_id") == device_id
+            ):
+                status = partition.get("status")
+                if isinstance(status, str) and status.startswith("armed"):
+                    partition_snapshot[idx] = status
+            if partition_snapshot:
+                self._pre_trigger_partition_status[device_id] = partition_snapshot
+
         # Set device as triggered immediately
         device["is_triggered"] = True
-        self._triggered_timestamps[device_id] = time.time()
+        self._triggered_first_seen.setdefault(device_id, time.time())
 
         # Protect triggered state from being cleared by ISECNet polling
         # for 30 seconds — enough for HA automations to detect the change
@@ -256,6 +301,21 @@ class GuardianCoordinator(DataUpdateCoordinator):
                 device_id = device.get("id")
                 processed_devices[device_id] = device
 
+                # Capture previous coordinator-tracked state BEFORE the API
+                # response overwrites it. Used by the Bug 3 preservation logic
+                # below (snapshot pre-trigger arm mode / partition status).
+                prev_device_data = (self.data or {}).get("devices", {}).get(device_id, {})
+                prev_is_triggered = bool(prev_device_data.get("is_triggered"))
+                prev_arm_mode = prev_device_data.get("arm_mode")
+                prev_partition_statuses: Dict[int, str] = {}
+                for p_idx, prev_partition in enumerate(
+                    p for p in (self.data or {}).get("partitions", [])
+                    if p.get("device_id") == device_id
+                ):
+                    p_status = prev_partition.get("status")
+                    if isinstance(p_status, str):
+                        prev_partition_statuses[p_idx] = p_status
+
                 # Check if device is eletrificador
                 model = device.get("model", "").upper()
                 is_eletrificador = "ELC" in model or "ELETRIFICADOR" in model
@@ -316,6 +376,40 @@ class GuardianCoordinator(DataUpdateCoordinator):
                                         _LOGGER.debug(
                                             f"Updated partition {rt_index} status to {rt_partition.get('state')}"
                                         )
+
+                            # Bug 3 preservation: AMT_2018_E_SMART zeros the
+                            # partition byte during an active alarm (data[22]=0x00),
+                            # so the parser reports arm_mode="disarmed" even with
+                            # the siren sounding. Snapshot the pre-trigger mode
+                            # on the False->True transition and restore it from
+                            # memory while the device stays triggered.
+                            if processed_devices[device_id].get("is_triggered"):
+                                if not prev_is_triggered:
+                                    if device_id not in self._pre_trigger_arm_mode:
+                                        if isinstance(prev_arm_mode, str) and prev_arm_mode.startswith("armed"):
+                                            self._pre_trigger_arm_mode[device_id] = prev_arm_mode
+                                    if device_id not in self._pre_trigger_partition_status:
+                                        armed_prev = {
+                                            idx: s for idx, s in prev_partition_statuses.items()
+                                            if isinstance(s, str) and s.startswith("armed")
+                                        }
+                                        if armed_prev:
+                                            self._pre_trigger_partition_status[device_id] = armed_prev
+
+                                pre_mode = self._pre_trigger_arm_mode.get(device_id)
+                                if pre_mode and processed_devices[device_id].get("arm_mode") == "disarmed":
+                                    processed_devices[device_id]["arm_mode"] = pre_mode
+                                    processed_devices[device_id]["is_armed"] = True
+
+                                snapshot = self._pre_trigger_partition_status.get(device_id, {})
+                                if snapshot:
+                                    partitions_to_restore = device.get("partitions", [])
+                                    for idx, prev_status in snapshot.items():
+                                        if idx < len(partitions_to_restore):
+                                            current = partitions_to_restore[idx].get("status")
+                                            if (current is None or current == "disarmed") and \
+                                               isinstance(prev_status, str) and prev_status.startswith("armed"):
+                                                partitions_to_restore[idx]["status"] = prev_status
 
                             # Get zones from status (avoids separate ISECNet call)
                             if status.get("zones"):
@@ -399,27 +493,43 @@ class GuardianCoordinator(DataUpdateCoordinator):
                                 zone["index"] = 0
                             all_zones.append(zone)
 
-            # Check for stale triggered state (10-minute timeout)
+            # Triggered safety timeout (Bug 2): only clears `is_triggered`
+            # when the API has NOT confirmed it during the configured window.
+            # The previous unconditional 10-minute timeout caused a flap
+            # `triggered -> disarmed -> triggered` every 10 minutes whenever
+            # the alarm stayed on for that long, because the API kept
+            # reporting True while the coordinator forced it back to False.
+            # The timeout still serves as a safety net for SSE-orphan triggers
+            # (set by SSE but never confirmed by the polling path).
             now = time.time()
             for device_id, device in processed_devices.items():
-                is_triggered = device.get("is_triggered", False)
-                if is_triggered:
-                    if device_id not in self._triggered_timestamps:
-                        self._triggered_timestamps[device_id] = now
-                    elif now - self._triggered_timestamps[device_id] > self._triggered_timeout:
-                        _LOGGER.info(
-                            "Device %d triggered state timed out after %d seconds, clearing",
-                            device_id, self._triggered_timeout
-                        )
-                        device["is_triggered"] = False
-                        # Also clear partition-level triggered if any
-                        for partition in all_partitions:
-                            if partition.get("device_id") == device_id:
-                                if partition.get("status") == "triggered":
-                                    partition["status"] = device.get("arm_mode", "disarmed")
-                        del self._triggered_timestamps[device_id]
+                if device.get("is_triggered"):
+                    rt = device.get("real_time_status") or {}
+                    api_confirmed = bool(rt.get("is_triggered"))
+                    if api_confirmed:
+                        # API confirms the trigger; refresh the timestamp so
+                        # the safety timeout never fires while the alarm is on.
+                        self._triggered_first_seen[device_id] = now
+                    else:
+                        first_seen = self._triggered_first_seen.setdefault(device_id, now)
+                        if now - first_seen > self._triggered_timeout:
+                            _LOGGER.info(
+                                "Device %s SSE-orphan trigger (no API confirmation) timed out after %ds, clearing",
+                                device_id, self._triggered_timeout,
+                            )
+                            device["is_triggered"] = False
+                            for partition in all_partitions:
+                                if partition.get("device_id") == device_id:
+                                    if partition.get("status") == "triggered":
+                                        partition["status"] = device.get("arm_mode", "disarmed")
+                            self._triggered_first_seen.pop(device_id, None)
+                            self._pre_trigger_arm_mode.pop(device_id, None)
+                            self._pre_trigger_partition_status.pop(device_id, None)
                 else:
-                    self._triggered_timestamps.pop(device_id, None)
+                    # Cleanup snapshots once the device leaves the triggered state
+                    self._triggered_first_seen.pop(device_id, None)
+                    self._pre_trigger_arm_mode.pop(device_id, None)
+                    self._pre_trigger_partition_status.pop(device_id, None)
 
             # Check for new events
             new_events = []
