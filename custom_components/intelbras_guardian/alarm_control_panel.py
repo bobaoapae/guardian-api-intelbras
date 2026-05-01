@@ -667,6 +667,15 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         # Optimistic state management
         self._optimistic_state: Optional[AlarmControlPanelState] = None
 
+        # Last arming intent ("home" or "away") set by arm_home/arm_away
+        # service calls. The unified state computation prefers this over
+        # mode-based heuristics so that a user pressing "Em Casa" stays as
+        # ARMED_HOME even when their `partition_arm_modes` config arms each
+        # partition in `armed_away` mode (which would otherwise be classified
+        # as ARMED_AWAY by the fallback). Cleared once all partitions are
+        # disarmed.
+        self._last_arm_intent: Optional[str] = None
+
         # Entity attributes
         self._attr_unique_id = f"{device_mac}_unified_alarm"
 
@@ -718,10 +727,19 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         """Compute the unified alarm state from coordinator data.
 
         Single source of truth shared by `state` (with optimistic override)
-        and `_get_real_state` (used to clear optimistic). Looks at the actual
-        armed mode of each partition (`armed_away` vs `armed_stay`/`armed_home`)
-        rather than just armed/disarmed sets — fixes Bug 4 where partial
-        arm_away with bypass was misclassified as ARMED_HOME.
+        and `_get_real_state` (used to clear optimistic).
+
+        Priority order:
+        1. Triggered → TRIGGERED.
+        2. No partitions armed → DISARMED.
+        3. User-issued intent (`_last_arm_intent` set by arm_home/arm_away)
+           wins over mode heuristics. This is what makes pressing "Em Casa"
+           stay ARMED_HOME even when `partition_arm_modes` arms each
+           partition in `armed_away` mode (the central reports armed_away,
+           but the unified intent is HOME).
+        4. Fallback for arming via keypad / after HA restart: any partition
+           in armed_away mode → ARMED_AWAY (covers partial arm_away with
+           pending bypass — the original Bug 4 case).
         """
         device = self.coordinator.get_device(self._device_id)
         if device and device.get("is_triggered"):
@@ -750,9 +768,12 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         if not armed_indices:
             return AlarmControlPanelState.DISARMED
-        # Any partition in armed_away dominates: covers partial arm_away with
-        # pending bypass, where one partition is already armed_away and the
-        # other waits for the user to confirm bypass of an open zone.
+
+        if self._last_arm_intent == "home":
+            return AlarmControlPanelState.ARMED_HOME
+        if self._last_arm_intent == "away":
+            return AlarmControlPanelState.ARMED_AWAY
+
         if mode_counts["away"] > 0:
             return AlarmControlPanelState.ARMED_AWAY
         return AlarmControlPanelState.ARMED_HOME
@@ -836,6 +857,20 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
             real_state = self._get_real_state()
             if real_state == self._optimistic_state:
                 self._optimistic_state = None
+
+        # Clear stale arming intent once every partition is fully disarmed
+        # (e.g., user disarmed via the keypad). Triggered partitions report
+        # status="triggered" so they do not match the disarmed check, which
+        # is intentional — we want to keep the intent through the trigger so
+        # the unified entity recovers the right armed state when the trigger
+        # ends.
+        if self._last_arm_intent is not None:
+            partition_states = self._get_partition_states()
+            if partition_states and all(
+                str(s).lower() == "disarmed" for s in partition_states.values()
+            ):
+                self._last_arm_intent = None
+
         super()._handle_coordinator_update()
 
     def _get_real_state(self):
@@ -862,6 +897,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         """Disarm all partitions that are currently armed."""
         _LOGGER.info(f"Unified alarm: Disarming armed partitions for device {self._device_id}")
 
+        self._last_arm_intent = None
         self._optimistic_state = AlarmControlPanelState.DISARMED
         self.async_write_ha_state()
 
@@ -929,6 +965,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
             f"Unified alarm: Arming HOME partitions {self._home_partitions} for device {self._device_id}"
         )
 
+        self._last_arm_intent = "home"
         self._optimistic_state = AlarmControlPanelState.ARMING
         self.async_write_ha_state()
 
@@ -1023,6 +1060,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
             f"Unified alarm: Arming AWAY partitions {self._away_partitions} for device {self._device_id}"
         )
 
+        self._last_arm_intent = "away"
         self._optimistic_state = AlarmControlPanelState.ARMING
         self.async_write_ha_state()
 
