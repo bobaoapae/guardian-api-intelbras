@@ -352,8 +352,13 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
             attrs["is_triggered"] = device.get("is_triggered", False)
             attrs["has_saved_password"] = device.get("has_saved_password", False)
             attrs["partitions_enabled"] = device.get("partitions_enabled")
-            # Connection status (for detecting AMT legacy app blocking)
+            # Connection status (for detecting AMT legacy app blocking).
+            # `connection_unavailable` is the debounced value used for
+            # `available`; `connection_unavailable_raw` reflects every poll
+            # so users can see brief APK takeovers without the entity
+            # actually flipping to unavailable.
             attrs["connection_unavailable"] = device.get("connection_unavailable", False)
+            attrs["connection_unavailable_raw"] = device.get("connection_unavailable_raw", False)
             attrs["last_updated"] = device.get("last_updated")
 
         attrs["pre_trigger_arm_mode"] = _pre_trigger_arm_mode_attr(self.coordinator, self._device_id)
@@ -822,6 +827,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         if device:
             attrs["connection_unavailable"] = device.get("connection_unavailable", False)
+            attrs["connection_unavailable_raw"] = device.get("connection_unavailable_raw", False)
             attrs["last_updated"] = device.get("last_updated")
 
         return attrs

@@ -66,6 +66,17 @@ class GuardianCoordinator(DataUpdateCoordinator):
         self._phantom_trigger_since: Dict[int, float] = {}
         self._phantom_trigger_grace = 90  # seconds with is_triggered=True and no zones_in_alarm
 
+        # Connection-unavailable debounce: the panel rejects concurrent
+        # ISECNet connections, so when the user opens the official APK and
+        # taps "Sync" we briefly fail to read status (~30-60s while the APK
+        # holds the connection). Without a grace period each entity flips to
+        # "unavailable" the very first cycle and partition names disappear
+        # from cards. Hide the unavailability for the first
+        # `_connection_unavailable_grace` seconds so a brief APK takeover is
+        # invisible to HA users.
+        self._connection_unavailable_since: Dict[int, float] = {}
+        self._connection_unavailable_grace = 60  # seconds
+
         # Previous zone open states for edge detection (zone events)
         self._prev_zone_open: Dict[tuple, bool] = {}
 
@@ -351,14 +362,29 @@ class GuardianCoordinator(DataUpdateCoordinator):
                                 else:
                                     del self._sse_triggered_until[device_id]
 
-                            # Track connection unavailability (e.g., AMT legacy app blocking)
-                            connection_unavailable = status.get("connection_unavailable", False)
-                            processed_devices[device_id]["connection_unavailable"] = connection_unavailable
+                            # Track connection unavailability (e.g., AMT legacy app blocking).
+                            # Apply a grace period so brief APK syncs (~30-60s where
+                            # the official app holds the panel) don't flip every
+                            # entity to "unavailable" instantly. The raw API signal
+                            # is preserved as `connection_unavailable_raw` for
+                            # diagnostics; entities key off `connection_unavailable`
+                            # which only flips True after the grace window.
+                            now_cu = time.time()
+                            connection_unavailable_raw = status.get("connection_unavailable", False)
+                            if connection_unavailable_raw:
+                                first_cu = self._connection_unavailable_since.setdefault(device_id, now_cu)
+                                debounced_unavailable = (now_cu - first_cu) > self._connection_unavailable_grace
+                            else:
+                                self._connection_unavailable_since.pop(device_id, None)
+                                debounced_unavailable = False
+                            processed_devices[device_id]["connection_unavailable_raw"] = connection_unavailable_raw
+                            processed_devices[device_id]["connection_unavailable"] = debounced_unavailable
                             processed_devices[device_id]["last_updated"] = status.get("last_updated")
 
-                            if connection_unavailable:
-                                _LOGGER.warning(
-                                    f"Device {device_id} connection unavailable - using last known state. "
+                            if connection_unavailable_raw:
+                                _LOGGER.debug(
+                                    f"Device {device_id} connection unavailable (raw, "
+                                    f"debounced={debounced_unavailable}) - using last known state. "
                                     f"Message: {status.get('message')}"
                                 )
 
@@ -660,7 +686,19 @@ class GuardianCoordinator(DataUpdateCoordinator):
             device["arm_mode"] = status.get("arm_mode")
             device["is_armed"] = status.get("is_armed")
             device["is_triggered"] = status.get("is_triggered")
-            device["connection_unavailable"] = status.get("connection_unavailable", False)
+            # Apply the same debounce as `_async_update_data` so a single-shot
+            # refresh during an APK sync window does not flip the entity to
+            # unavailable on its own.
+            now_cu = time.time()
+            connection_unavailable_raw = status.get("connection_unavailable", False)
+            if connection_unavailable_raw:
+                first_cu = self._connection_unavailable_since.setdefault(device_id, now_cu)
+                debounced_unavailable = (now_cu - first_cu) > self._connection_unavailable_grace
+            else:
+                self._connection_unavailable_since.pop(device_id, None)
+                debounced_unavailable = False
+            device["connection_unavailable_raw"] = connection_unavailable_raw
+            device["connection_unavailable"] = debounced_unavailable
             device["last_updated"] = status.get("last_updated")
 
             # Eletrificador-specific fields
