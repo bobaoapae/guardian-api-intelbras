@@ -56,6 +56,16 @@ class GuardianCoordinator(DataUpdateCoordinator):
         # Maps device_id -> expiry timestamp
         self._sse_triggered_until: Dict[int, float] = {}
 
+        # "Phantom" / stuck-trigger detection: the AMT_2018_E_SMART central
+        # latches `is_triggered=True` until an explicit disarm. If the
+        # monitoring centre silences the siren remotely (without disarming),
+        # the alarm physically stops but HA stays stuck on TRIGGERED. Track
+        # how long the device has reported triggered while no zone is
+        # actually in alarm any more, so the coordinator can release the
+        # phantom trigger after a grace period.
+        self._phantom_trigger_since: Dict[int, float] = {}
+        self._phantom_trigger_grace = 90  # seconds with is_triggered=True and no zones_in_alarm
+
         # Previous zone open states for edge detection (zone events)
         self._prev_zone_open: Dict[tuple, bool] = {}
 
@@ -501,16 +511,63 @@ class GuardianCoordinator(DataUpdateCoordinator):
             # reporting True while the coordinator forced it back to False.
             # The timeout still serves as a safety net for SSE-orphan triggers
             # (set by SSE but never confirmed by the polling path).
+            #
+            # Phantom-trigger release (Bug 5): the AMT_2018_E_SMART latches
+            # `is_triggered=True` until an explicit disarm, even after the
+            # siren is silenced and every zone exits the alarm state. If the
+            # API confirms the trigger but no zone reports `is_in_alarm` for
+            # `_phantom_trigger_grace` seconds, treat the trigger as cleared
+            # — otherwise HA stays stuck on TRIGGERED for hours, generating
+            # repeated automation runs and notifications.
             now = time.time()
             for device_id, device in processed_devices.items():
                 if device.get("is_triggered"):
                     rt = device.get("real_time_status") or {}
                     api_confirmed = bool(rt.get("is_triggered"))
-                    if api_confirmed:
-                        # API confirms the trigger; refresh the timestamp so
-                        # the safety timeout never fires while the alarm is on.
+                    api_zones = rt.get("zones") or []
+                    # Both signals are needed because we do not know which
+                    # the AMT_2018_E_SMART latches:
+                    #   - `is_in_alarm`: zone-level alarm flag from the
+                    #     central (may latch until disarm on some firmwares)
+                    #   - `is_open`: zone currently tripped (PIR zones go
+                    #     back to False seconds after motion ends; magnetic
+                    #     zones stay True until physically closed)
+                    # If either still indicates activity we treat the
+                    # trigger as genuine; only when both are False for the
+                    # grace window do we release the latched trigger.
+                    any_in_alarm = any(z.get("is_in_alarm") for z in api_zones)
+                    any_open = any(
+                        z.get("is_open") and not z.get("is_bypassed")
+                        for z in api_zones
+                    )
+                    if api_confirmed and (any_in_alarm or any_open):
+                        # Genuine ongoing alarm — refresh both timers.
                         self._triggered_first_seen[device_id] = now
+                        self._phantom_trigger_since.pop(device_id, None)
+                    elif api_confirmed:
+                        # API still reports triggered but no zone is in
+                        # alarm or open any more — start (or continue) the
+                        # phantom-trigger countdown. Refresh first_seen so
+                        # the SSE-orphan timeout does not also fire here.
+                        self._triggered_first_seen[device_id] = now
+                        first_phantom = self._phantom_trigger_since.setdefault(device_id, now)
+                        if now - first_phantom > self._phantom_trigger_grace:
+                            _LOGGER.info(
+                                "Device %s phantom trigger released after %.0fs (API still reports triggered but no zone in alarm/open)",
+                                device_id, now - first_phantom,
+                            )
+                            device["is_triggered"] = False
+                            for partition in all_partitions:
+                                if partition.get("device_id") == device_id:
+                                    if partition.get("status") == "triggered":
+                                        partition["status"] = device.get("arm_mode", "disarmed")
+                            self._triggered_first_seen.pop(device_id, None)
+                            self._phantom_trigger_since.pop(device_id, None)
+                            self._pre_trigger_arm_mode.pop(device_id, None)
+                            self._pre_trigger_partition_status.pop(device_id, None)
                     else:
+                        # SSE-only trigger that API never confirmed.
+                        self._phantom_trigger_since.pop(device_id, None)
                         first_seen = self._triggered_first_seen.setdefault(device_id, now)
                         if now - first_seen > self._triggered_timeout:
                             _LOGGER.info(
@@ -528,6 +585,7 @@ class GuardianCoordinator(DataUpdateCoordinator):
                 else:
                     # Cleanup snapshots once the device leaves the triggered state
                     self._triggered_first_seen.pop(device_id, None)
+                    self._phantom_trigger_since.pop(device_id, None)
                     self._pre_trigger_arm_mode.pop(device_id, None)
                     self._pre_trigger_partition_status.pop(device_id, None)
 
