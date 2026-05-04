@@ -91,16 +91,42 @@ class GuardianSirenOffButton(CoordinatorEntity, ButtonEntity):
         }
 
     async def async_press(self) -> None:
-        """Handle button press - turn off siren."""
-        _LOGGER.info("Turning off siren for device %d", self._device_id)
+        """Handle button press — silence siren or stop a panic.
 
-        result = await self.coordinator.client.turn_off_siren(self._device_id)
+        The ISECNet `SIREN_OFF` (0x4F) command only stops siren output for
+        zone-driven alarms; a panic alarm keeps the central in a triggered
+        state until the panel receives `DEACTIVATE_CENTRAL` (0x44 alone, no
+        partition byte). The official Intelbras app handles this implicitly
+        in its disarm button (`armOrDisarm2018or4010`): if `isSirenTriggered`
+        is true, it just sends `getComandoDesativarCentral()` and returns.
+
+        Mirror that behaviour: when the device is currently triggered we
+        route to /alarm/{id}/disarm with `partition_id=None`, which the API
+        translates into `_build_isecv1_disarm_cmd(password, None)` — the
+        same `[0x44]` packet the official app sends. Otherwise we keep the
+        plain SIREN_OFF behaviour for non-triggered cases (e.g. lingering
+        siren after a zone alarm cleared on its own).
+        """
+        device = self.coordinator.get_device(self._device_id)
+        is_triggered = bool(device and device.get("is_triggered"))
+
+        if is_triggered:
+            _LOGGER.info(
+                "Device %d is triggered — sending DEACTIVATE_CENTRAL ([0x44]) to silence siren and clear panic",
+                self._device_id,
+            )
+            result = await self.coordinator.client.disarm_partition(self._device_id, None)
+            failure_label = "Falha ao desativar central"
+        else:
+            _LOGGER.info("Sending SIREN_OFF for device %d", self._device_id)
+            result = await self.coordinator.client.turn_off_siren(self._device_id)
+            failure_label = "Falha ao desligar sirene"
 
         if not result.get("success", False):
             error = result.get("error", "Erro desconhecido")
-            _LOGGER.error("Failed to turn off siren: %s", error)
+            _LOGGER.error("%s: %s", failure_label, error)
             self.hass.components.persistent_notification.async_create(
-                f"Falha ao desligar sirene: {error}",
+                f"{failure_label}: {error}",
                 title="Intelbras Guardian",
                 notification_id=f"guardian_siren_error_{self._device_id}",
             )
