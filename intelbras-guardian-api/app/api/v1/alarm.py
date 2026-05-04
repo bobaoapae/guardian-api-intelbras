@@ -88,6 +88,7 @@ class ZoneStatusInfo(BaseModel):
     battery_low: bool = Field(default=False, description="Whether wireless sensor has low battery")
     signal_strength: Optional[int] = Field(None, description="Wireless signal strength (0-10, None if not wireless)")
     tamper: bool = Field(default=False, description="Whether zone has tamper alert")
+    is_in_alarm: bool = Field(default=False, description="Whether zone is currently registering an active alarm (latched until disarm on some firmwares)")
 
 
 class AlarmStatusResponse(BaseModel):
@@ -807,6 +808,7 @@ async def get_alarm_status(
                 battery_low=z.get("battery_low", False),
                 signal_strength=z.get("signal"),
                 tamper=z.get("tamper", False),
+                is_in_alarm=z.get("triggered", False),
             )
             for z in status.zones
         ]
@@ -922,6 +924,7 @@ async def get_alarm_status_auto(
                         battery_low=z.get("battery_low", False),
                         signal_strength=z.get("signal_strength"),
                         tamper=z.get("tamper", False),
+                        is_in_alarm=z.get("is_in_alarm", False),
                     )
                     for z in last_known.get("zones", [])
                 ]
@@ -974,6 +977,7 @@ async def get_alarm_status_auto(
                 battery_low=z.get("battery_low", False),
                 signal_strength=z.get("signal"),
                 tamper=z.get("tamper", False),
+                is_in_alarm=z.get("triggered", False),
             )
             for z in status.zones
         ]
@@ -992,7 +996,7 @@ async def get_alarm_status_auto(
                 "index": z.index, "name": z.name, "is_open": z.is_open,
                 "is_bypassed": z.is_bypassed, "is_wireless": z.is_wireless,
                 "battery_low": z.battery_low, "signal_strength": z.signal_strength,
-                "tamper": z.tamper,
+                "tamper": z.tamper, "is_in_alarm": z.is_in_alarm,
             } for z in zones],
             "is_eletrificador": status.is_eletrificador,
             "shock_enabled": status.shock_enabled,
