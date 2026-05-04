@@ -771,6 +771,43 @@ class ISECNetClient:
                     await self._disconnect_device(device_id)
                 return False, str(e)
 
+    async def trigger_panic(
+        self,
+        device_id: int,
+        mac: str,
+        password: str,
+        panic_type: int = 1,
+        use_ip_receiver: bool = False,
+        ip_receiver_addr: str = None,
+        ip_receiver_port: int = None,
+        ip_receiver_account: str = None
+    ) -> Tuple[bool, str]:
+        """Trigger panic alarm on device.
+
+        Args:
+            device_id: Device ID
+            mac: Device MAC address
+            password: Alarm panel password
+            panic_type: 0=silent, 1=audible, 2=fire, 3=medical
+        """
+        device_lock = self._get_device_lock(device_id)
+        async with device_lock:
+            success, conn = await self._ensure_connected(
+                device_id, mac, password,
+                use_ip_receiver, ip_receiver_addr, ip_receiver_port, ip_receiver_account
+            )
+            if not success or not conn:
+                return False, "Not connected"
+
+            try:
+                success, message = await conn.protocol.trigger_panic(panic_type)
+                return success, message
+            except Exception as e:
+                logger.error(f"Error triggering panic for device {device_id}: {e}")
+                async with self._lock:
+                    await self._disconnect_device(device_id)
+                return False, str(e)
+
     async def get_complete_status_raw(
         self,
         device_id: int,

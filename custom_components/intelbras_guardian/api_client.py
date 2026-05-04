@@ -402,6 +402,12 @@ class GuardianApiClient:
             "POST", f"/api/v1/alarm/{device_id}/siren/off", {}
         )
 
+    async def trigger_panic(self, device_id: int, panic_type: int = 1) -> Dict[str, Any]:
+        """Trigger panic alarm on a device."""
+        return await self._request_with_error(
+            "POST", f"/api/v1/alarm/{device_id}/panic", {"panic_type": panic_type}
+        )
+
     async def eletrificador_alarm_deactivate(self, device_id: int) -> bool:
         """Deactivate electric fence alarm."""
         result = await self._request(

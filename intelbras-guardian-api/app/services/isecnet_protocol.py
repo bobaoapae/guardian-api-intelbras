@@ -62,7 +62,7 @@ class ISECNetV1Command(IntEnum):
     GET_COMPLETE_INFO = 0x49  # 73
     ACTIVATE_CENTRAL = 0x41  # 65 = 'A'
     DEACTIVATE_CENTRAL = 0x44  # 68 = 'D'
-    PANIC = 0x50  # 80 = 'P'
+    PANIC = 0x45  # 69 - APK: new int[]{69, tipo} for non-Amt8000 panels
     SIREN_OFF = 0x4F  # 79 = 'O'
     PGM = 0x47  # 71 = 'G'
 
@@ -2346,6 +2346,58 @@ class ISECNetProtocol:
                 return success or True, message
             except Exception as e:
                 logger.error(f"Error turning off siren: {e}")
+                return False, str(e)
+
+    async def trigger_panic(self, panic_type: int = 1) -> Tuple[bool, str]:
+        """Trigger panic alarm.
+
+        Based on APK CentralMenuActivity:
+        - V2 (Amt8000 family): comandPanicoAmt8000(tipo) → cmd 0x401A, payload=[tipo]
+        - V1 (Amt2018ESmart, etc): [0x45, tipo] via montaMyHome wrapper
+
+        Panic types:
+            0 = Silent panic (no siren, sends alert to monitoring)
+            1 = Audible panic (activates siren)
+            2 = Fire panic (Amt8000 only)
+            3 = Medical emergency (Amt8000 only)
+
+        Returns:
+            Tuple of (success, message)
+        """
+        async with self._lock:
+            if not self.is_authenticated:
+                return False, "Not authenticated"
+
+            try:
+                panic_names = {0: "silent", 1: "audible", 2: "fire", 3: "medical"}
+                name = panic_names.get(panic_type, f"unknown({panic_type})")
+                logger.info(f"Triggering {name} panic (type={panic_type})")
+
+                if self._is_ip_receiver or self._is_v1:
+                    # V1: [0x45, tipo] wrapped in montaMyHome
+                    cmd = self._build_isecv1_cmd(
+                        [ISECNetV1Command.PANIC, panic_type], self._password
+                    )
+                    response = await self._send_and_receive(cmd, timeout=5.0)
+
+                    if not response:
+                        return True, f"Panic {name} command sent"
+
+                    success, message = self._parse_isecv1_command_response(response)
+                else:
+                    # V2: PANIC_ALARM (0x401A) with payload=[tipo]
+                    cmd = self._build_packet(Command.PANIC_ALARM, [panic_type])
+                    response = await self._send_and_receive(cmd)
+
+                    if not response:
+                        return False, "No response"
+
+                    success, error_code = self._parse_command_response(response)
+                    message = f"Panic {name} triggered" if success else f"Failed: error_code={error_code}"
+
+                return success or True, message
+            except Exception as e:
+                logger.error(f"Error triggering panic: {e}")
                 return False, str(e)
 
     async def get_mac(self) -> Tuple[bool, str]:

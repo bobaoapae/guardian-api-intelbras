@@ -15,6 +15,9 @@ DEFAULT_SCAN_INTERVAL = 1
 # Eletrificador models
 ELETRIFICADOR_MODELS = ["ELC", "ELETRIFICADOR"]
 
+# AMT 8000 family models - support fire and medical panic
+AMT8000_MODELS = ["AMT_8000", "AMT8000", "AMT 8000"]
+
 # State mapping: API -> Home Assistant (Alarm)
 # The API now returns arm_mode values from ISECNet protocol
 STATE_MAPPING = {

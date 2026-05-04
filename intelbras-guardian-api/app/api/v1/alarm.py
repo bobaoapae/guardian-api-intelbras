@@ -1493,6 +1493,94 @@ async def turn_off_siren(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class PanicRequest(BaseModel):
+    """Panic alarm request model."""
+    panic_type: int = Field(default=1, ge=0, le=3, description="Panic type: 0=silent, 1=audible, 2=fire, 3=medical")
+    password: Optional[str] = Field(None, min_length=4, max_length=6, description="Device password (4-6 digits). If not provided, uses saved password.")
+    save_password: bool = Field(default=False, description="Save password for future use")
+
+
+@router.post("/{device_id}/panic", response_model=EletrificadorOperationResponse)
+async def trigger_panic(
+    device_id: int,
+    request: PanicRequest,
+    x_session_id: str = Header(..., alias="X-Session-ID")
+):
+    """
+    Trigger a panic alarm on the device.
+
+    Panic types:
+    - 0: Silent panic (no audible alarm, sends alert to monitoring)
+    - 1: Audible panic (triggers siren + sends alert)
+    - 2: Fire panic (AMT 8000 family only)
+    - 3: Medical emergency (AMT 8000 family only)
+
+    Requires X-Session-ID header from login.
+    """
+    try:
+        access_token = await auth_service.get_valid_token(x_session_id)
+
+        password = await _get_password(x_session_id, device_id, request.password, request.save_password)
+        if not password:
+            raise AlarmOperationError("Password required. Provide password or save one first.")
+
+        conn_info = await _get_device_connection_info(access_token, device_id)
+        if not conn_info:
+            raise DeviceNotFoundError(f"Device {device_id} not found or connection info not available")
+
+        panic_names = {0: "silencioso", 1: "audível", 2: "incêndio", 3: "médico"}
+        panic_name = panic_names.get(request.panic_type, f"tipo {request.panic_type}")
+        conn_type = "IP Receiver" if conn_info.use_ip_receiver else "Cloud"
+        logger.info(f"Triggering {panic_name} panic for device {device_id} (MAC: {conn_info.mac}) via {conn_type}")
+
+        success, message = await isecnet_client.trigger_panic(
+            device_id=device_id,
+            mac=conn_info.mac,
+            password=password,
+            panic_type=request.panic_type,
+            use_ip_receiver=conn_info.use_ip_receiver,
+            ip_receiver_addr=conn_info.ip_receiver_addr,
+            ip_receiver_port=conn_info.ip_receiver_port,
+            ip_receiver_account=conn_info.ip_receiver_account
+        )
+
+        if not success:
+            connection_errors = ["busy", "offline", "timeout", "connection", "not connected", "connect"]
+            is_connection_error = any(err in message.lower() for err in connection_errors)
+
+            if is_connection_error:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "error": "ConnectionUnavailable",
+                        "message": f"Conexao com a central indisponivel: {message}. Verifique se o app AMT nao esta aberto.",
+                    }
+                )
+
+            raise AlarmOperationError(f"Failed to trigger panic: {message}")
+
+        return EletrificadorOperationResponse(
+            success=True,
+            device_id=device_id,
+            new_status="triggered",
+            message=f"Pânico {panic_name} disparado com sucesso"
+        )
+
+    except HTTPException:
+        raise
+    except InvalidSessionError as e:
+        raise HTTPException(status_code=401, detail=str(e.message))
+    except AlarmOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e.message))
+    except DeviceNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e.message))
+    except APIConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e.message))
+    except Exception as e:
+        logger.error(f"Unexpected error triggering panic: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{device_id}/debug/complete-status")
 async def get_complete_status_debug(
     device_id: int,
