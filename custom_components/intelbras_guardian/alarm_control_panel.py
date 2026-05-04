@@ -864,7 +864,16 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         # is intentional — we want to keep the intent through the trigger so
         # the unified entity recovers the right armed state when the trigger
         # ends.
-        if self._last_arm_intent is not None:
+        #
+        # The optimistic_state guard is critical: during the ~1s window
+        # between async_alarm_arm_home spawning the arm and ISECNet polling
+        # picking up the new partition status, every partition still reads
+        # as "disarmed" even though the user just kicked off an arm. Without
+        # the guard the cleanup wipes the intent the user just set, the
+        # 15-second optimistic timer eventually fires, and the entity falls
+        # back to mode-based heuristics (regression observed on 2026-05-03
+        # 23:11 — bypass+rearm "Em Casa" flipping to Ausente).
+        if self._last_arm_intent is not None and self._optimistic_state is None:
             partition_states = self._get_partition_states()
             if partition_states and all(
                 str(s).lower() == "disarmed" for s in partition_states.values()
