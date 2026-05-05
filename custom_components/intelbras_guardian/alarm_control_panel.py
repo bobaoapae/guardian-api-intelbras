@@ -864,27 +864,33 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
             if real_state == self._optimistic_state:
                 self._optimistic_state = None
 
-        # Clear stale arming intent once every partition is fully disarmed
-        # (e.g., user disarmed via the keypad). Triggered partitions report
-        # status="triggered" so they do not match the disarmed check, which
-        # is intentional — we want to keep the intent through the trigger so
-        # the unified entity recovers the right armed state when the trigger
-        # ends.
-        #
-        # The optimistic_state guard is critical: during the ~1s window
-        # between async_alarm_arm_home spawning the arm and ISECNet polling
-        # picking up the new partition status, every partition still reads
-        # as "disarmed" even though the user just kicked off an arm. Without
-        # the guard the cleanup wipes the intent the user just set, the
-        # 15-second optimistic timer eventually fires, and the entity falls
-        # back to mode-based heuristics (regression observed on 2026-05-03
-        # 23:11 — bypass+rearm "Em Casa" flipping to Ausente).
+        # Clear stale arming intent once the API confirms the device is
+        # really disarmed (e.g., user disarmed via the keypad). The check
+        # MUST come from the real-time status payload — earlier versions
+        # inferred "all disarmed" from `partition_states`, which proved
+        # unsafe in two ways:
+        #   1. Optimistic ARMING/ARMED_* races during a HA-issued command
+        #      (~1s window before ISECNet picks up the new partition).
+        #   2. Partial cloud refreshes where one partition simply
+        #      disappears from the cached payload for a single cycle —
+        #      observed on 2026-05-04 00:24, 53 min after Em Casa, when
+        #      `partition_states` momentarily collapsed to `{0: disarmed}`
+        #      and the cleanup fired before the next poll restored the
+        #      missing partition. The unified entity then fell back to
+        #      mode-based heuristics and flipped to Ausente.
+        # Trusting the parser's `is_armed`/`is_triggered` flags only — and
+        # gating on `optimistic is None` — covers both regressions without
+        # false-clearing during transients.
         if self._last_arm_intent is not None and self._optimistic_state is None:
-            partition_states = self._get_partition_states()
-            if partition_states and all(
-                str(s).lower() == "disarmed" for s in partition_states.values()
-            ):
-                self._last_arm_intent = None
+            device = self.coordinator.get_device(self._device_id)
+            if device:
+                rt = device.get("real_time_status") or {}
+                # Only clear when the API explicitly says the device is
+                # idle (not armed and not triggered) — and we actually
+                # have a fresh real-time status (a missing/empty payload
+                # means we don't know yet, so leave the intent alone).
+                if rt and rt.get("is_armed") is False and not rt.get("is_triggered"):
+                    self._last_arm_intent = None
 
         super()._handle_coordinator_update()
 
