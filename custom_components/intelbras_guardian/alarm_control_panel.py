@@ -802,17 +802,24 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, RestoreEntity, AlarmCo
         if not armed_indices:
             return AlarmControlPanelState.DISARMED
 
-        if self._last_arm_intent == "home":
-            return AlarmControlPanelState.ARMED_HOME
-        if self._last_arm_intent == "away":
-            return AlarmControlPanelState.ARMED_AWAY
-
-        # No intent recorded (HA restart with no restored state, or arming
-        # done from the keypad). Try to recover the user's intent from the
-        # configured home/away partition sets before falling back to the
-        # raw mode count.
+        # Intent only wins when it is consistent with the partitions the
+        # central is actually reporting as armed. If the user re-armed via
+        # the keypad while HA was offline, a restored intent could
+        # contradict the new armed pattern (e.g., intent="home" but the
+        # central now has every away partition armed) — in that case we
+        # fall through to the topology-based recovery below so the entity
+        # mirrors what the panel really shows, not what HA last issued.
         away_set = set(self._away_partitions)
         home_set = set(self._home_partitions)
+        if self._last_arm_intent == "home" and home_set and armed_indices.issubset(home_set):
+            return AlarmControlPanelState.ARMED_HOME
+        if self._last_arm_intent == "away" and away_set and armed_indices.issubset(away_set):
+            return AlarmControlPanelState.ARMED_AWAY
+
+        # No usable intent (none recorded, or restored value contradicts
+        # the current armed pattern). Try to recover the mode from the
+        # configured home/away partition sets before falling back to raw
+        # mode counts.
         if away_set and armed_indices == away_set:
             return AlarmControlPanelState.ARMED_AWAY
         if home_set and armed_indices == home_set and home_set != away_set:
