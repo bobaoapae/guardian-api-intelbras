@@ -842,6 +842,36 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, RestoreEntity, AlarmCo
         _LOGGER.debug(f"Unified alarm computed state: {computed}")
         return computed
 
+    def _compute_pre_trigger_arm_mode(self) -> Optional[str]:
+        """Compute the pre-trigger home/away mode from the partition snapshot.
+
+        The shared `_pre_trigger_arm_mode_attr` reads `coordinator._pre_trigger_arm_mode`,
+        which on AMT_2018_E_SMART (V1 partial status) is always `"armed_away"` —
+        the partial response cannot distinguish armed_stay from armed_away
+        (`isecnet_protocol.py` defaults armed bits to `armed_away`). For the
+        unified entity, home vs away is defined by *which* partitions are armed
+        (per `home_partitions`/`away_partitions` config), not by the per-partition
+        mode byte. Apply the same set-based recovery as `_compute_state` to the
+        partition snapshot captured at trigger time.
+        """
+        snapshot = self.coordinator._pre_trigger_partition_status.get(self._device_id, {})
+        if not snapshot:
+            return None
+        armed_indices = set(snapshot.keys())
+        away_set = set(self._away_partitions)
+        home_set = set(self._home_partitions)
+
+        if self._last_arm_intent == "home" and home_set and armed_indices.issubset(home_set):
+            return "home"
+        if self._last_arm_intent == "away" and away_set and armed_indices.issubset(away_set):
+            return "away"
+        if away_set and armed_indices == away_set:
+            return "away"
+        if home_set and armed_indices == home_set and home_set != away_set:
+            return "home"
+        # Mixed pattern: any partition that's exclusive to away_set tips it to away.
+        return "away" if any(i in away_set and i not in home_set for i in armed_indices) else "home"
+
     @property
     def extra_state_attributes(self):
         """Return extra state attributes."""
@@ -871,7 +901,7 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, RestoreEntity, AlarmCo
             "away_partitions": self._away_partitions,
             "partition_arm_modes": self._partition_arm_modes,
             "partition_status": partition_status,
-            "pre_trigger_arm_mode": _pre_trigger_arm_mode_attr(self.coordinator, self._device_id),
+            "pre_trigger_arm_mode": self._compute_pre_trigger_arm_mode(),
             # Persisted across HA restarts via RestoreEntity so the
             # unified entity does not drop to mode-based heuristics
             # after a restart while the central is partially armed.
