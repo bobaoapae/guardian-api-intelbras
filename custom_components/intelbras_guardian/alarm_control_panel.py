@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -631,7 +632,7 @@ class GuardianAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
         )
 
 
-class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntity):
+class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, RestoreEntity, AlarmControlPanelEntity):
     """Unified alarm control panel that controls multiple partitions."""
 
     _attr_has_entity_name = True
@@ -683,6 +684,33 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
 
         # Entity attributes
         self._attr_unique_id = f"{device_mac}_unified_alarm"
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last arming intent across HA restarts.
+
+        `_last_arm_intent` is otherwise runtime-only — losing it on
+        restart drops the unified entity back to mode-based heuristics
+        and can flip ARMED_HOME → ARMED_AWAY when `partition_arm_modes`
+        arms partition 0 in away mode (which is the default).
+
+        Only restores from the explicit `last_arm_intent` attribute we
+        write out. NOT inferred from the state name itself: if the
+        previous state was already wrong (e.g., this version is being
+        rolled out while the entity is in a misclassified state), the
+        state-name shortcut would lock the wrong intent in. With
+        attribute-only restoration, an entity coming up without the
+        attribute (first restart after upgrade) stays at intent=None
+        and the set-based fallback in _compute_state recovers the
+        correct mode from the configured home/away topology.
+        """
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if not last_state:
+            return
+        stored_intent = last_state.attributes.get("last_arm_intent")
+        if stored_intent in ("home", "away"):
+            self._last_arm_intent = stored_intent
+            _LOGGER.debug(f"Unified alarm restored last_arm_intent={stored_intent} from state attributes")
 
     @property
     def available(self) -> bool:
@@ -779,6 +807,20 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
         if self._last_arm_intent == "away":
             return AlarmControlPanelState.ARMED_AWAY
 
+        # No intent recorded (HA restart with no restored state, or arming
+        # done from the keypad). Try to recover the user's intent from the
+        # configured home/away partition sets before falling back to the
+        # raw mode count.
+        away_set = set(self._away_partitions)
+        home_set = set(self._home_partitions)
+        if away_set and armed_indices == away_set:
+            return AlarmControlPanelState.ARMED_AWAY
+        if home_set and armed_indices == home_set and home_set != away_set:
+            return AlarmControlPanelState.ARMED_HOME
+
+        # Mixed / partial pattern that doesn't match either configured set
+        # exactly: prefer ARMED_AWAY when any partition reports armed_away
+        # mode (covers a partial bypass mid-arm) otherwise ARMED_HOME.
         if mode_counts["away"] > 0:
             return AlarmControlPanelState.ARMED_AWAY
         return AlarmControlPanelState.ARMED_HOME
@@ -823,6 +865,10 @@ class GuardianUnifiedAlarmControlPanel(CoordinatorEntity, AlarmControlPanelEntit
             "partition_arm_modes": self._partition_arm_modes,
             "partition_status": partition_status,
             "pre_trigger_arm_mode": _pre_trigger_arm_mode_attr(self.coordinator, self._device_id),
+            # Persisted across HA restarts via RestoreEntity so the
+            # unified entity does not drop to mode-based heuristics
+            # after a restart while the central is partially armed.
+            "last_arm_intent": self._last_arm_intent,
         }
 
         if device:
