@@ -2244,28 +2244,25 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning eletrificador ALARM ON using SYSTEM_ARM with partition_index=1 (payload byte=2)")
+            logger.info(f"Turning eletrificador ALARM ON using SYSTEM_ARM with partition_index=0 (payload byte=1)")
 
-                # APK ParticoesAdapter: alarm partition ID=2 → partition byte=2
-                # _build_arm_cmd adds +1, so partition_index=1 → byte 2
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=1)
-                logger.debug(f"Eletrificador ALARM ON command: {cmd.hex()}")
-                response = await self._send_and_receive(cmd)
+            # CORREÇÃO: partition_index=0 gera o byte 0x01 (Partição do Alarme)[cite: 2]
+            cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=0)
+            logger.debug(f"Eletrificador ALARM ON command: {cmd.hex()}")
+            response = await self._send_and_receive(cmd)
 
-                if not response:
-                    return False, "No response"
+            if not response:
+                return False, "No response"
 
-                logger.debug(f"Eletrificador ALARM ON response ({len(response)} bytes): {response.hex()}")
+            success, error_code = self._parse_command_response(response)
+            if not success:
+                return False, f"Eletrificador ALARM ON failed: error_code={error_code}"
 
-                success, error_code = self._parse_command_response(response)
-                if not success:
-                    return False, f"Eletrificador ALARM ON failed: error_code={error_code}"
+            return True, "Eletrificador ALARM turned ON"
 
-                return True, "Eletrificador ALARM turned ON"
-
-            except Exception as e:
-                logger.error(f"Error turning eletrificador alarm on: {e}")
-                return False, str(e)
+        except Exception as e:
+            logger.error(f"Error turning eletrificador alarm on: {e}")
+            return False, str(e)
 
     async def eletrificador_alarm_off(self) -> Tuple[bool, str]:
         """Turn off eletrificador ALARM (disarm the alarm function).
@@ -2286,28 +2283,25 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                logger.info(f"Turning eletrificador ALARM OFF using SYSTEM_DISARM with partition_index=1 (payload byte=2)")
+            logger.info(f"Turning eletrificador ALARM OFF using SYSTEM_DISARM with partition_index=0 (payload byte=1)")
 
-                # APK ParticoesAdapter: alarm partition ID=2 → partition byte=2
-                # _build_arm_cmd adds +1, so partition_index=1 → byte 2
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=1)
-                logger.debug(f"Eletrificador ALARM OFF command: {cmd.hex()}")
-                response = await self._send_and_receive(cmd)
+            # CORREÇÃO: partition_index=0 gera o byte 0x01 (Partição do Alarme)[cite: 2]
+            cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=0)
+            logger.debug(f"Eletrificador ALARM OFF command: {cmd.hex()}")
+            response = await self._send_and_receive(cmd)
 
-                if not response:
-                    return False, "No response"
+            if not response:
+                return False, "No response"
 
-                logger.debug(f"Eletrificador ALARM OFF response ({len(response)} bytes): {response.hex()}")
+            success, error_code = self._parse_command_response(response)
+            if not success:
+                return False, f"Eletrificador ALARM OFF failed: error_code={error_code}"
 
-                success, error_code = self._parse_command_response(response)
-                if not success:
-                    return False, f"Eletrificador ALARM OFF failed: error_code={error_code}"
+            return True, "Eletrificador ALARM turned OFF"
 
-                return True, "Eletrificador ALARM turned OFF"
-
-            except Exception as e:
-                logger.error(f"Error turning eletrificador alarm off: {e}")
-                return False, str(e)
+        except Exception as e:
+            logger.error(f"Error turning eletrificador alarm off: {e}")
+            return False, str(e)
 
     async def turn_off_siren(self) -> Tuple[bool, str]:
         """Turn off the alarm siren.
