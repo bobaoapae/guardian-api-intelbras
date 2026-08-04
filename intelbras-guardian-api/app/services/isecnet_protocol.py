@@ -1133,8 +1133,8 @@ class ISECNetProtocol:
         # Based on APK AlarmModel.getPartitionMaxCount()
         partition_counts = {
             65: 4,    # AMT_4010
-            36: 0,    # ANM_24_NET
-            37: 0,    # ANM_24_NET_G2
+            36: 1,    # ANM_24_NET
+            37: 1,    # ANM_24_NET_G2
             1: 16,    # AMT_8000
             2: 16,    # AMT_8000_LITE
             3: 16,    # AMT_8000_PRO
@@ -1483,12 +1483,33 @@ class ISECNetProtocol:
                 # Set overall status based on alarm state
                 status.arm_mode = alarm_state
                 status.is_armed = status.alarm_enabled
-                status.is_triggered = status.shock_triggered or status.alarm_triggered
+
+                # =====================================================================
+                # CORRIGIDO: Filtro de Falso Positivo (Debounce Lógico)
+                # =====================================================================
+                # Durante a transição de armar/desarmar, a placa gera um pulso que
+                # acusa `triggered = True` por alguns milissegundos.
+                # Para evitar alertas críticos falsos, só aceitamos o disparo se:
+                # 1. For um Pânico manual (panic_byte == 1).
+                # 2. O setor correspondente (Choque ou Alarme) estiver DE FATO LIGADO.
+                if panic_byte == 1:
+                    status.is_triggered = True
+                else:
+                    real_shock_trigger = status.shock_triggered and status.shock_enabled
+                    real_alarm_trigger = status.alarm_triggered and status.alarm_enabled
+                    status.is_triggered = real_shock_trigger or real_alarm_trigger
+                
+                # Log extra caso o disparo seja real para ajudar nos seus testes
+                if status.is_triggered:
+                    logger.warning("V2 Eletrificador ALERTA: Disparo real confirmado pelos bits de estado!")
+                # =====================================================================
+
             else:
                 logger.warning(f"V2 response too short for eletrificador parsing: {len(response)} bytes")
 
             return status
-
+            
+      
         # Standard alarm panel parsing (non-eletrificador)
         if len(response) < 144:
             logger.warning(f"Status response too short for alarm panel: {len(response)} bytes")
@@ -2148,13 +2169,12 @@ class ISECNetProtocol:
                 return False, str(e)
 
     async def shock_on(self, zones: Optional[List[int]] = None) -> Tuple[bool, str]:
-        """Turn on eletrificador shock (fence) = ARM all partitions.
+        """Turn on eletrificador shock (fence) isolated from alarm.
 
-        Based on APK CentralMenuActivity.getArmDisarmElc6012Net():
-        - ELC6012NET always uses partition=255 (0xFF = ALL partitions)
-        - ARM: getArmaDesarmaCentralAlarmeAmt8000((char) 1, 255)
-        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 0xFF, 1, checksum]
-
+        Modified for Home Assistant:
+        - Instead of partition=255 (0xFF = ALL partitions) which arms the alarm too,
+        - Uses partition=0 to isolate the shock activation.
+        
         Returns:
             Tuple of (success, message)
         """
@@ -2163,11 +2183,10 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                # APK getArmDisarmElc6012Net: partition=255 (ALL), operation=1 (ARM)
-                # _build_arm_cmd with partition_index=None → 0xFF
-                logger.info("Turning shock ON: SYSTEM_ARM_DISARM partition=0xFF (all)")
+                # Alterado de partition_index=None (0xFF) para partition_index=0
+                logger.info("Turning shock ON: SYSTEM_ARM_DISARM partition=0 (shock only)")
 
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=None)
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_ARM, partition_index=0)
                 logger.info(f"Shock ON command ({len(cmd)} bytes): {cmd.hex()}, source_id={self.source_id}")
                 response = await self._send_and_receive(cmd)
 
@@ -2187,12 +2206,11 @@ class ISECNetProtocol:
                 return False, str(e)
 
     async def shock_off(self, zones: Optional[List[int]] = None) -> Tuple[bool, str]:
-        """Turn off eletrificador shock (fence) = DISARM all partitions.
+        """Turn off eletrificador shock (fence) isolated from alarm.
 
-        Based on APK CentralMenuActivity.getArmDisarmElc6012Net():
-        - ELC6012NET always uses partition=255 (0xFF = ALL partitions)
-        - DISARM: getArmaDesarmaCentralAlarmeAmt8000((char) 0, 255)
-        - Packet: [0,0, srcId0,srcId1, 0,4, 0x40,0x1E, 0xFF, 0, checksum]
+        Modified for Home Assistant:
+        - Instead of partition=255 (0xFF = ALL partitions) which disarms the alarm too,
+        - Uses partition=0 to isolate the shock deactivation.
 
         Returns:
             Tuple of (success, message)
@@ -2202,11 +2220,10 @@ class ISECNetProtocol:
                 return False, "Not authenticated"
 
             try:
-                # APK getArmDisarmElc6012Net: partition=255 (ALL), operation=0 (DISARM)
-                # _build_arm_cmd with partition_index=None → 0xFF
-                logger.info("Turning shock OFF: SYSTEM_ARM_DISARM partition=0xFF (all)")
+                # Alterado de partition_index=None (0xFF) para partition_index=0
+                logger.info("Turning shock OFF: SYSTEM_ARM_DISARM partition=0 (shock only)")
 
-                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=None)
+                cmd = self._build_arm_cmd(AlarmOperation.SYSTEM_DISARM, partition_index=0)
                 logger.info(f"Shock OFF command ({len(cmd)} bytes): {cmd.hex()}, source_id={self.source_id}")
                 response = await self._send_and_receive(cmd)
 
