@@ -269,12 +269,22 @@ Abra http://localhost:8000 no navegador para:
 
 **Opção A: Via HACS (Recomendado)**
 
+[![Abrir este repositório no HACS da sua instância](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=bobaoapae&repository=guardian-api-intelbras&category=integration)
+
+Clique no botão acima, encontre "Intelbras Guardian" e clique em **Instalar**. Depois reinicie o
+Home Assistant.
+
+<details>
+<summary>Fazendo na mão</summary>
+
 1. Abra o HACS no Home Assistant
 2. Clique nos 3 pontos (canto superior direito) → **Repositórios personalizados**
 3. Adicione a URL do repositório: `https://github.com/bobaoapae/guardian-api-intelbras`
 4. Categoria: **Integração**
 5. Clique em **Adicionar** → encontre "Intelbras Guardian" → **Instalar**
 6. Reinicie o Home Assistant
+
+</details>
 
 **Opção B: Via install.sh (Docker)**
 
