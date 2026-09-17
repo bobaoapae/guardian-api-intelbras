@@ -174,6 +174,9 @@ class ISECNetProtocol:
         self._is_v1: bool = False  # True if using V1 protocol (port 9015)
         self._partitions_enabled: Optional[bool] = None  # True if device has partitions enabled (from status)
         self._model_code: Optional[int] = None  # Cached model code from status response
+        # Some 0-partition panels (ANM 24 NET) still require the 0x41 partition-A
+        # byte on ACTIVATE/DEACTIVATE. Set after a successful arm retry.
+        self._v1_arm_uses_partition_a: bool = False
 
     @staticmethod
     def _checksum(data: List[int]) -> int:
@@ -883,10 +886,26 @@ class ISECNetProtocol:
 
         # Partition enabled byte
         # 0 = single partition mode, 1 = multiple partitions enabled
+        # ANM 24 / AMT 1000 report 0 partitions in the APK. On those models
+        # data[21] is NOT a partition-enable flag (ANM 24 NET often has 0x01
+        # here while disarmed with no partitions). Treating it as True made
+        # arm/disarm send the wrong ISECNet frame (0xE7 Deactivation denied).
         partition_enabled = data[partition_offset]
-        status.partitions_enabled = bool(partition_enabled)
-        self._partitions_enabled = bool(partition_enabled)  # Cache for arm/disarm commands
-        logger.info(f"Partition enabled byte (data[{partition_offset}]): {partition_enabled} (partitions_enabled={status.partitions_enabled})")
+        num_partitions = self._get_max_partitions_for_model(model_code)
+        if num_partitions == 0:
+            status.partitions_enabled = False
+            self._partitions_enabled = False
+            logger.info(
+                f"Model {status.model} has no partitions; ignoring data[{partition_offset}]="
+                f"{partition_enabled} (partitions_enabled=False)"
+            )
+        else:
+            status.partitions_enabled = bool(partition_enabled)
+            self._partitions_enabled = bool(partition_enabled)
+            logger.info(
+                f"Partition enabled byte (data[{partition_offset}]): {partition_enabled} "
+                f"(partitions_enabled={status.partitions_enabled})"
+            )
 
         # Partition armed status bits
         # APK parsePartitions: Each bit represents one partition's armed state
@@ -899,7 +918,6 @@ class ISECNetProtocol:
         # AMT 2018 family: all partitions in single byte (data[22])
         # AMT 4010: partitions A,B in data[28], partitions C,D in data[29]
         partitions = []
-        num_partitions = self._get_max_partitions_for_model(model_code)
 
         for i in range(num_partitions):
             if model_code == 65 and i >= 2:  # AMT_4010 partitions C,D in next byte
@@ -929,6 +947,14 @@ class ISECNetProtocol:
             pass
 
         status.partitions = partitions
+
+        # 0-partition panels (ANM 24): overall armed flag lives in the same
+        # status byte used for partition bits on multi-partition models.
+        if num_partitions == 0:
+            is_armed = bool(partition_status_byte & 0x01)
+            status.is_armed = is_armed
+            status.arm_mode = "armed_away" if is_armed else "disarmed"
+            logger.info(f"No-partition panel armed={is_armed} from data[{armed_offset}] bit0")
 
         # Determine overall status
         if partitions:
@@ -1969,7 +1995,17 @@ class ISECNetProtocol:
                 if self._is_ip_receiver or self._is_v1:
                     # ISECNet V1 mode - command includes password
                     # Used for both IP Receiver and V1 Cloud connections
-                    stay = (mode == "stay")
+                    # API uses "home"; ISECNet V1 stay flag is the 'P' suffix.
+                    stay = mode in ("stay", "home")
+
+                    # Models with 0 partitions (ANM 24, AMT 1000) must never send a
+                    # partition byte — data[21] is not a partition-enable flag there.
+                    model_has_no_partitions = (
+                        self._model_code is not None
+                        and self._get_max_partitions_for_model(self._model_code) == 0
+                    )
+                    if model_has_no_partitions:
+                        effective_partitions_enabled = False
 
                     # Only include partition byte if device has partitions enabled
                     effective_partition = partition_index
@@ -1978,44 +2014,62 @@ class ISECNetProtocol:
                         effective_partition = None
 
                     conn_mode = "IP Receiver" if self._is_ip_receiver else "V1 Cloud"
-                    logger.debug(f"Arming using ISECNet V1 ({conn_mode} mode), mode={mode}, partition={effective_partition}, partitions_enabled={effective_partitions_enabled}")
-                    cmd = self._build_isecv1_arm_cmd(self._password, effective_partition, stay)
+                    logger.info(
+                        f"Arming using ISECNet V1 ({conn_mode}), mode={mode}, stay={stay}, "
+                        f"partition={effective_partition}, partitions_enabled={effective_partitions_enabled}, "
+                        f"model_code={self._model_code}"
+                    )
 
-                    # ARM command behavior: Unlike DISARM, the panel may not respond immediately
-                    # due to exit delay or zone checking. Use a reasonable timeout and
-                    # enable retries for network glitches. Treat timeout as potential success
-                    # (verify with status later).
-                    response = await self._send_and_receive(cmd, timeout=5.0, retries=1, retry_delay=0.5)
+                    attempts: List[Tuple[Optional[int], str]] = [
+                        (effective_partition, "primary"),
+                    ]
+                    # ANM 24 NET (and some AMT firmwares) reject a bare 0x41
+                    # ACTIVATE with 0xE7. Retry with partition A (0x41 0x41).
+                    if effective_partition is None:
+                        attempts.append((0, "retry-partition-A"))
+                    # Opposite fallback: 0xE3 No partitions if we included a byte.
+                    if effective_partition is not None:
+                        attempts.append((None, "retry-no-partition"))
 
-                    if not response:
-                        # No response to ARM is common - panel may be processing exit delay
-                        # This is NOT necessarily a failure - we'll verify with status check
-                        logger.info("No immediate response to ARM command (may be processing exit delay)")
-                        return True, f"Armed ({mode}) - command sent"
-
-                    logger.debug(f"V1 Arm response: {response.hex()}")
-                    success, message = self._parse_isecv1_command_response(response)
-
-                    # Fallback: if we got "No partitions" error and we sent a partition byte,
-                    # retry WITHOUT the partition byte (in case partitions_enabled was not known)
-                    if not success and "No partitions" in message and effective_partition is not None:
-                        logger.info(f"Device doesn't have partitions enabled, retrying without partition byte")
-                        self._partitions_enabled = False  # Update instance cache
-                        cmd = self._build_isecv1_arm_cmd(self._password, None, stay)
+                    success = False
+                    message = "No ARM attempt"
+                    tried: set = set()
+                    for part, label in attempts:
+                        key = part if part is not None else -1
+                        if key in tried:
+                            continue
+                        tried.add(key)
+                        cmd = self._build_isecv1_arm_cmd(self._password, part, stay)
+                        logger.info(f"V1 ARM {label}: stay={stay} partition={part} cmd_len={len(cmd)}")
                         response = await self._send_and_receive(cmd, timeout=5.0, retries=1, retry_delay=0.5)
 
                         if not response:
-                            # Same as above - no response may mean command is being processed
-                            logger.info("No immediate response to ARM retry (may be processing exit delay)")
+                            # No response to ARM is common - panel may be processing exit delay
+                            logger.info("No immediate response to ARM command (may be processing exit delay)")
                             return True, f"Armed ({mode}) - command sent"
 
-                        logger.debug(f"V1 Arm response (retry): {response.hex()}")
+                        logger.debug(f"V1 Arm response ({label}): {response.hex()}")
                         success, message = self._parse_isecv1_command_response(response)
+                        if success:
+                            if part is None:
+                                self._partitions_enabled = False
+                            elif model_has_no_partitions:
+                                # Partition A was required even though the model
+                                # has no logical partitions — remember for disarm.
+                                self._partitions_enabled = False
+                                self._v1_arm_uses_partition_a = True
+                            return True, f"Armed ({mode})"
 
-                    if success:
-                        return True, f"Armed ({mode})"
-                    else:
-                        return False, f"Arm command failed: {message}"
+                        retryable = (
+                            "No partitions" in message
+                            or "Deactivation denied" in message
+                            or "Invalid command" in message
+                        )
+                        if not retryable:
+                            return False, f"Arm command failed: {message}"
+                        logger.warning(f"V1 ARM {label} failed ({message}), trying next variant")
+
+                    return False, f"Arm command failed: {message}"
                 else:
                     # ISECNet V2 mode (Cloud)
                     logger.debug(f"Arming using ISECNet V2, mode={mode}, partition={partition_index}")
@@ -2075,35 +2129,61 @@ class ISECNetProtocol:
                         logger.debug(f"Device has partitions disabled (cached), skipping partition byte")
                         effective_partition = None
 
+                    model_has_no_partitions = (
+                        self._model_code is not None
+                        and self._get_max_partitions_for_model(self._model_code) == 0
+                    )
+                    if model_has_no_partitions:
+                        effective_partitions_enabled = False
+                        if not self._v1_arm_uses_partition_a:
+                            effective_partition = None
+
                     conn_mode = "IP Receiver" if self._is_ip_receiver else "V1 Cloud"
-                    logger.debug(f"Disarming using ISECNet V1 ({conn_mode} mode), partition={effective_partition}, partitions_enabled={effective_partitions_enabled}")
-                    cmd = self._build_isecv1_disarm_cmd(self._password, effective_partition)
-                    response = await self._send_and_receive(cmd)
+                    logger.info(
+                        f"Disarming using ISECNet V1 ({conn_mode}), partition={effective_partition}, "
+                        f"partitions_enabled={effective_partitions_enabled}, model_code={self._model_code}"
+                    )
 
-                    if not response:
-                        return False, "No response"
+                    attempts: List[Tuple[Optional[int], str]] = [
+                        (effective_partition, "primary"),
+                    ]
+                    if self._v1_arm_uses_partition_a and effective_partition is None:
+                        attempts.insert(0, (0, "partition-A-cached"))
+                    if effective_partition is None:
+                        attempts.append((0, "retry-partition-A"))
+                    if effective_partition is not None:
+                        attempts.append((None, "retry-no-partition"))
 
-                    logger.debug(f"V1 Disarm response: {response.hex()}")
-                    success, message = self._parse_isecv1_command_response(response)
-
-                    # Fallback: if we got "No partitions" error and we sent a partition byte,
-                    # retry WITHOUT the partition byte (in case partitions_enabled was not known)
-                    if not success and "No partitions" in message and effective_partition is not None:
-                        logger.info(f"Device doesn't have partitions enabled, retrying without partition byte")
-                        self._partitions_enabled = False  # Update instance cache
-                        cmd = self._build_isecv1_disarm_cmd(self._password, None)
+                    success = False
+                    message = "No DISARM attempt"
+                    tried: set = set()
+                    for part, label in attempts:
+                        key = part if part is not None else -1
+                        if key in tried:
+                            continue
+                        tried.add(key)
+                        cmd = self._build_isecv1_disarm_cmd(self._password, part)
+                        logger.info(f"V1 DISARM {label}: partition={part}")
                         response = await self._send_and_receive(cmd)
 
                         if not response:
-                            return False, "No response on retry"
+                            return False, "No response"
 
-                        logger.debug(f"V1 Disarm response (retry): {response.hex()}")
+                        logger.debug(f"V1 Disarm response ({label}): {response.hex()}")
                         success, message = self._parse_isecv1_command_response(response)
+                        if success:
+                            return True, "Disarmed"
 
-                    if success:
-                        return True, "Disarmed"
-                    else:
-                        return False, f"Disarm command failed: {message}"
+                        retryable = (
+                            "No partitions" in message
+                            or "Deactivation denied" in message
+                            or "Invalid command" in message
+                        )
+                        if not retryable:
+                            return False, f"Disarm command failed: {message}"
+                        logger.warning(f"V1 DISARM {label} failed ({message}), trying next variant")
+
+                    return False, f"Disarm command failed: {message}"
                 else:
                     # ISECNet V2 mode (Cloud)
                     logger.debug(f"Disarming using ISECNet V2, partition={partition_index}")
