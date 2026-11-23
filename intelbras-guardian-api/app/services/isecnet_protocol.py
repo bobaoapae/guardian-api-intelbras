@@ -815,8 +815,15 @@ class ISECNetProtocol:
             status.is_valid = False
             return status
 
-        # Model code at data[19] (APK bytes[20])
-        model_code = data[19]
+        # Model code at data[19] (APK bytes[20]) for the partial status (0x5A).
+        # The AMT 4010 answers the extended status (0x5B, 55 data bytes) with
+        # the model at data[25]; data[19] is 0x00 there. Verified on a real
+        # AMT 4010 (fw 0x66): data[25]=0x41, data[27]=partitioned,
+        # data[28]=armed partition bitmask, data[31..35]=hh mm dd MM yy.
+        if len(data) >= 50 and data[19] == 0x00 and data[25] == 65:
+            model_code = 65
+        else:
+            model_code = data[19]
         self._model_code = model_code  # Cache for extended status commands
         status.model = self._get_model_name(model_code)
         logger.debug(f"Model code: 0x{model_code:02X} ({model_code}) = {status.model}")
@@ -1758,6 +1765,17 @@ class ISECNetProtocol:
                     cmd = self._build_isecv1_status_cmd(password)
                     response = await self._send_and_receive(cmd, timeout=5.0)
 
+                    # The AMT 4010 rejects the partial status (0x5A) with
+                    # 0xE5 COMMAND_DEPRECATED and only answers the extended
+                    # status (0x5B). Retry with it and remember the model so
+                    # later polls use the right command from the start.
+                    if response and len(response) >= 3 and response[1] == 0xE9 and response[2] == 0xE5:
+                        logger.info(f"{mode}: partial status deprecated (0xE5), retrying with extended status (0x5B)")
+                        cmd = self._build_isecv1_cmd([ISECNetV1Command.GET_EXTENDED_STATUS], password)
+                        response = await self._send_and_receive(cmd, timeout=5.0)
+                        if response and len(response) > 26 and response[26] == 65:
+                            self._model_code = 65
+
                     if not response:
                         return False, f"{mode}: No response to status command (password validation)"
 
@@ -1770,7 +1788,10 @@ class ISECNetProtocol:
 
                     # Password validated, parse status to cache partitions_enabled
                     valid, data = self._parse_isecv1_response(response)
-                    if valid and len(data) > 21:
+                    if valid and self._model_code == 65 and len(data) > 27:
+                        self._partitions_enabled = bool(data[27])
+                        logger.debug(f"Cached partitions_enabled={self._partitions_enabled} from auth validation (AMT 4010)")
+                    elif valid and len(data) > 21:
                         self._partitions_enabled = bool(data[21])
                         logger.debug(f"Cached partitions_enabled={self._partitions_enabled} from auth validation")
 
